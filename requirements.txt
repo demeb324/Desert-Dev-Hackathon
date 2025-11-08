@@ -1,0 +1,7 @@
+# LM Studio Power Benchmark Dependencies
+
+# LM Studio Python SDK for local LLM inference
+lmstudio>=1.0.1
+
+# Note: powermetrics is a macOS system utility (no Python package needed)
+# The scripts use subprocess to invoke powermetrics directly
