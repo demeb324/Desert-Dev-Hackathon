@@ -11,6 +11,8 @@ import time
 import argparse
 import threading
 import subprocess
+import os
+import sys
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, asdict
@@ -23,8 +25,6 @@ except ImportError:
     exit(1)
 
 # Import our powermetrics parser
-import sys
-import os
 sys.path.insert(0, os.path.dirname(__file__))
 from powermetrics_analyzer import PowerMetricsParser
 
@@ -109,8 +109,9 @@ class PowerMetricsCollector:
         if self.running:
             return
 
+        # Don't use sudo here - the script should already be run with sudo
         cmd = [
-            "sudo", "powermetrics",
+            "powermetrics",
             "-i", str(self.interval_ms),
             "-n", "0",  # Infinite samples (we'll stop manually)
             "--samplers", "cpu_power,gpu_power,ane_power",
@@ -122,27 +123,46 @@ class PowerMetricsCollector:
         self.start_time = time.time()
 
         try:
+            # Use line-buffered mode without universal_newlines for better thread compatibility
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True,
-                bufsize=1
+                bufsize=0,  # Unbuffered for real-time reading in thread
             )
 
             # Start background thread to read output
             self.thread = threading.Thread(target=self._read_output, daemon=True)
             self.thread.start()
 
+            # Start stderr monitoring thread
+            self.stderr_thread = threading.Thread(target=self._monitor_stderr, daemon=True)
+            self.stderr_thread.start()
+
+            # Give powermetrics a moment to start and check for immediate errors
+            time.sleep(0.5)
+            if self.process.poll() is not None:
+                # Process already exited - there was an error
+                self.running = False
+                raise RuntimeError("powermetrics failed to start. Make sure the script is run with sudo.")
+
         except Exception as e:
             self.running = False
+            if self.process:
+                self.process.terminate()
             raise RuntimeError(f"Failed to start powermetrics: {e}")
 
     def _read_output(self):
         """Read powermetrics output in background thread."""
-        for line in self.process.stdout:
+        # Read bytes and decode line by line for better threading compatibility
+        for line_bytes in iter(self.process.stdout.readline, b''):
             if not self.running:
                 break
+
+            try:
+                line = line_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                continue
 
             sample = self.parser.parse_line(line)
             if sample:
@@ -151,6 +171,24 @@ class PowerMetricsCollector:
 
                 with self.lock:
                     self.samples.append(sample)
+
+    def _monitor_stderr(self):
+        """Monitor stderr for errors in background thread."""
+        if not self.process or not self.process.stderr:
+            return
+
+        for line_bytes in iter(self.process.stderr.readline, b''):
+            try:
+                line = line_bytes.decode('utf-8').strip()
+            except UnicodeDecodeError:
+                continue
+
+            if line:
+                print(f"powermetrics error: {line}", file=sys.stderr)
+                if "must be invoked as the superuser" in line.lower():
+                    print("\nERROR: This script must be run with sudo!", file=sys.stderr)
+                    self.running = False
+                    break
 
     def stop(self) -> List[Dict]:
         """
@@ -265,10 +303,19 @@ def run_single_benchmark(
     print("Starting power metrics collection...")
     collector.start()
 
+    # Wait a bit and verify samples are being collected
+    time.sleep(2)
+    initial_samples = len(collector.get_samples())
+    if initial_samples == 0:
+        print("WARNING: No power samples collected yet. Power metrics may not be working!")
+        print("Make sure you ran this script with sudo.")
+    else:
+        print(f"✓ Power collection working ({initial_samples} samples collected)")
+
     # Phase 1: Baseline
     print(f"\n[1/3] Collecting baseline ({baseline_duration_s}s)...")
     baseline_start = time.time()
-    time.sleep(baseline_duration_s)
+    time.sleep(baseline_duration_s - 2)  # Subtract the 2s we already waited
     baseline_end = time.time()
     baseline_duration = baseline_end - baseline_start
 
@@ -328,6 +375,12 @@ def run_single_benchmark(
     # Stop power collection
     print("Stopping power metrics collection...")
     all_samples = collector.stop()
+    print(f"Total samples collected: {len(all_samples)}")
+
+    if len(all_samples) == 0:
+        print("ERROR: No power samples were collected!")
+        print("This usually means powermetrics failed to start.")
+        print("Make sure you ran this script with: sudo python3 lm_studio_power_benchmark.py")
 
     # Extract samples for each phase (using relative time)
     baseline_time_start = 0
@@ -554,6 +607,14 @@ Note: This script requires:
     )
 
     args = parser.parse_args()
+
+    # Check if running as root (required for powermetrics)
+    if os.geteuid() != 0:
+        print("ERROR: This script must be run with sudo privileges.", file=sys.stderr)
+        print("\nPowermetrics requires root access to collect system power data.", file=sys.stderr)
+        print(f"\nPlease run with sudo:", file=sys.stderr)
+        print(f"  sudo python3 {' '.join(sys.argv)}", file=sys.stderr)
+        sys.exit(1)
 
     # Generate output filename if not provided
     if args.output is None:
