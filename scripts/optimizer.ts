@@ -64,11 +64,11 @@ const remove_duplicate_whitespace = (input: string): string => {
  * @returns The optimized text with lexicon removed and whitespace normalized
  * @example
  * ```typescript
- * opimize_prompt("Please   help me,  thank you")
+ * optimize_prompt("Please   help me,  thank you")
  * // Returns: "help me,"
  * ```
  */
-export const opimize_prompt = (input: string): string => {
+export const optimize_prompt = (input: string): string => {
   let text = input;
   text = remove_lexicon(text);
   text = remove_duplicate_whitespace(text);
