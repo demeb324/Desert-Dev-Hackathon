@@ -5,21 +5,19 @@
  * pipeline. Current optimizations include removing polite lexicon, removing commas,
  * and normalizing whitespace. New phases can be easily added to the optimizationPhases array.
  */
-
 /**
  * Lexicon of regular expressions matching polite words to be removed during text optimization.
  * These patterns use word boundaries to match whole words only and are case-insensitive.
  * Each pattern is applied globally across the input text.
  */
 const lexicon = [
-  /\bplease\b/gi,
-  /\bthank you\b/gi,
-  /\bthanks\b/gi,
-  /\bi'm sorry\b/gi,
-  /\bsorry\b/gi,
-  /\bno problem\b/gi,
+    /\bplease\b/gi,
+    /\bthank you\b/gi,
+    /\bthanks\b/gi,
+    /\bi'm sorry\b/gi,
+    /\bsorry\b/gi,
+    /\bno problem\b/gi,
 ];
-
 /**
  * Removes all occurrences of predefined lexicon patterns from the input text.
  *
@@ -30,15 +28,13 @@ const lexicon = [
  * @param input - The text string to process
  * @returns The text with all lexicon patterns removed
  */
-const remove_lexicon = (input: string): string => {
-  let modifiedString = input;
-  for (const regex of lexicon) {
-    modifiedString = modifiedString.replace(regex, '');
-  }
-
-  return modifiedString;
+const remove_lexicon = (input) => {
+    let modifiedString = input;
+    for (const regex of lexicon) {
+        modifiedString = modifiedString.replace(regex, '');
+    }
+    return modifiedString;
 };
-
 /**
  * Normalizes whitespace in the input text by trimming and collapsing multiple spaces.
  *
@@ -48,32 +44,28 @@ const remove_lexicon = (input: string): string => {
  * @param input - The text string to process
  * @returns The text with normalized whitespace
  */
-const remove_duplicate_whitespace = (input: string): string => {
-  return input.trim().replace(/\s+/g, ' ');
-
+const remove_duplicate_whitespace = (input) => {
+    return input.trim().replace(/\s+/g, ' ');
 };
-
 /**
  * Removes all comma characters from the input text.
  *
  * @param input - The text string to process
  * @returns The text with all commas removed
  */
-const remove_commas = (input: string): string => {
-  return input.replace(/,/g, '');
+const remove_commas = (input) => {
+    return input.replace(/,/g, '');
 };
-
 /**
  * Ordered list of optimization phases to apply to text.
  * Each phase is a function that takes a string and returns a processed string.
  * Phases are applied sequentially in the order defined here.
  */
 const optimizationPhases = [
-  remove_lexicon,
-  remove_commas,
-  remove_duplicate_whitespace,
+    remove_lexicon,
+    remove_commas,
+    remove_duplicate_whitespace,
 ];
-
 /**
  * Optimizes text/prompts by applying a series of transformations.
  *
@@ -97,10 +89,10 @@ const optimizationPhases = [
  * // Returns: "but for understanding."
  * ```
  */
-export const optimize_prompt = (input: string): string => {
-  let text = input;
-  for (const phase of optimizationPhases) {
-    text = phase(text);
-  }
-  return text;
+export const optimize_prompt = (input) => {
+    let text = input;
+    for (const phase of optimizationPhases) {
+        text = phase(text);
+    }
+    return text;
 };
