@@ -1,86 +1,64 @@
-# LM Studio Power Consumption Benchmark
+# LM Studio Inference Benchmark with Power Monitoring
 
-Tools for measuring power consumption during LLM inference using macOS powermetrics and LM Studio.
+Tools for benchmarking LLM inference and correlating with power consumption using macOS powermetrics.
 
 ## Overview
 
-This directory contains two main scripts:
+This directory contains two main scripts that work together:
 
-1. **`powermetrics_analyzer.py`** - Standalone tool for collecting and analyzing macOS power metrics
-2. **`lm_studio_power_benchmark.py`** - Benchmark suite that measures power consumption during LM Studio inference
+1. **`powermetrics_analyzer.py`** - Collects power consumption data from macOS powermetrics
+2. **`lm_studio_power_benchmark.py`** - Runs LLM inference benchmarks and records detailed timing
+
+The scripts run **separately** and results are correlated via timestamps.
 
 ## Requirements
 
 ### System Requirements
 - macOS with Apple Silicon (M1/M2/M3/M4)
-- sudo/root access (required for powermetrics)
+- sudo/root access (required only for powermetrics)
 - LM Studio installed and running
 
 ### Python Dependencies
 ```bash
-pip install -r requirements.txt
-```
-
-This installs:
-- `lmstudio` - Official LM Studio Python SDK
-
-## Quick Start
-
-### 1. Install Dependencies
-```bash
 pip install lmstudio
 ```
 
-### 2. Start LM Studio
-1. Open LM Studio application
-2. Download and load a model (e.g., qwen/qwen3-4b-2507)
-3. Start the local server (green "Start Server" button)
+## Quick Start - Two Terminal Workflow
 
-### 3. Run Benchmark
+### Terminal 1: Start Power Monitoring
 ```bash
-sudo python3 scripts/lm_studio_power_benchmark.py
+# Start collecting power data (runs until Ctrl+C)
+sudo python3 scripts/powermetrics_analyzer.py --samples 1000 --output power_data.csv
 ```
 
-The script will:
+This will collect power samples at 1-second intervals and save to CSV.
+
+### Terminal 2: Run Benchmark
+```bash
+# No sudo needed for benchmark!
+python3 scripts/lm_studio_power_benchmark.py --output benchmark.json
+```
+
+This will:
 - Connect to LM Studio
 - Run 9 prompts (3 short, 3 medium, 3 long)
-- Measure power consumption before, during, and after each inference
-- Generate a JSON report with detailed metrics
+- Record detailed timing for each inference
+- Generate a JSON report with timestamps
 
-## Usage
+### Stop Power Monitoring
+When the benchmark completes, press `Ctrl+C` in Terminal 1 to stop power collection.
 
-### Basic Usage
-```bash
-# Use currently loaded model with default settings (10s baseline/cooldown)
-sudo python3 lm_studio_power_benchmark.py
-```
+### Correlate Results
+Use the timestamps in `benchmark.json` to find corresponding power samples in `power_data.csv`.
 
-### Specify Model
-```bash
-# Load and benchmark a specific model
-sudo python3 lm_studio_power_benchmark.py --model qwen/qwen3-4b-2507
-```
+## Why Two Separate Scripts?
 
-### Custom Timing
-```bash
-# Longer baseline and cooldown periods
-sudo python3 lm_studio_power_benchmark.py --baseline 15 --cooldown 15
-```
-
-### Custom Output
-```bash
-# Specify output file location
-sudo python3 lm_studio_power_benchmark.py --output results/my_benchmark.json
-```
-
-### All Options
-```bash
-sudo python3 lm_studio_power_benchmark.py \
-  --model qwen/qwen3-4b-2507 \
-  --baseline 15 \
-  --cooldown 15 \
-  --output benchmark_results.json
-```
+Running power monitoring and benchmarks separately provides:
+- **Simpler architecture** - No threading complexity
+- **Better reliability** - powermetrics runs independently
+- **Flexibility** - Can start power monitoring before benchmark
+- **No sudo for benchmark** - Only powermetrics needs root access
+- **Easier debugging** - Each component works independently
 
 ## Benchmark Suite
 
@@ -101,19 +79,18 @@ The benchmark runs 9 prompts across 3 categories:
 - Longer context processing
 - Examples: "Write a detailed analysis of renewable energy sources..."
 
-## Output Format
+## Output Formats
 
-### JSON Report Structure
+### Benchmark JSON Output
 ```json
 {
-  "benchmark_id": "2025-11-08T14:30:00.000000",
+  "benchmark_id": "2025-11-08T14:30:00.123456",
   "model": "qwen/qwen3-4b-2507",
   "summary": {
     "total_prompts": 9,
-    "avg_baseline_power_mw": 950,
-    "avg_inference_power_mw": 22500,
-    "avg_cooldown_power_mw": 4500,
-    "avg_tokens_per_second": 45.2
+    "avg_tokens_per_second": 45.2,
+    "avg_time_to_first_token_ms": 523.4,
+    "total_duration_s": 125.3
   },
   "prompts": [
     {
@@ -121,182 +98,183 @@ The benchmark runs 9 prompts across 3 categories:
       "prompt": "What is 2+2?",
       "response": "2+2 equals 4.",
       "timing": {
-        "baseline_duration_s": 10.0,
-        "inference_duration_s": 0.8,
-        "cooldown_duration_s": 10.0
+        "prompt_submit_time": "2025-11-08T14:30:01.234567",
+        "first_token_time": "2025-11-08T14:30:01.756789",
+        "response_complete_time": "2025-11-08T14:30:02.123456",
+        "inference_duration_s": 0.889,
+        "time_to_first_token_ms": 522.2
       },
       "inference_stats": {
         "prompt_tokens": 5,
         "completion_tokens": 6,
-        "tokens_per_second": 7.5,
-        "time_to_first_token_ms": 120.5,
-        "inference_duration_s": 0.8
-      },
-      "power_consumption": {
-        "baseline": {
-          "min_mw": 800,
-          "max_mw": 1200,
-          "avg_mw": 950,
-          "sample_count": 10
-        },
-        "inference": {
-          "min_mw": 15000,
-          "max_mw": 28000,
-          "avg_mw": 22500,
-          "sample_count": 1
-        },
-        "cooldown": {
-          "min_mw": 2000,
-          "max_mw": 8000,
-          "avg_mw": 4500,
-          "sample_count": 10
-        }
+        "tokens_per_second": 42.5
       }
     }
   ]
 }
 ```
 
-## How It Works
-
-### Power Measurement Process
-
-1. **Baseline Phase (10s default)**
-   - Measures idle power consumption before inference
-   - Establishes baseline system power usage
-   - Helps isolate inference-specific power draw
-
-2. **Inference Phase (variable duration)**
-   - Submits prompt to LM Studio
-   - Measures power during model computation
-   - Tracks Time To First Token (TTFT) and generation speed
-   - Duration varies based on prompt complexity and response length
-
-3. **Cooldown Phase (10s default)**
-   - Measures power consumption after inference completes
-   - Captures system return to baseline
-   - Shows GPU/CPU cooldown behavior
-
-### Technical Implementation
-
-- **Threading**: Runs powermetrics in background thread for continuous monitoring
-- **Time Synchronization**: Uses relative timestamps to align power samples with inference phases
-- **LM Studio SDK**: Direct integration with LM Studio's official Python SDK
-- **Progress Tracking**: Callbacks for first token and completion events
-
-## Power Metrics Explained
-
-### Power Measurements (in milliwatts - mW)
-
-- **CPU Power**: Main processor power consumption
-- **GPU Power**: Graphics/Neural Engine power (critical for LLM inference)
-- **ANE Power**: Apple Neural Engine (if utilized by model)
-- **Combined Power**: Total of CPU + GPU + ANE
-
-### Expected Power Ranges (Apple Silicon)
-
-- **Baseline**: 500-2000 mW (idle system)
-- **Inference**: 15,000-35,000 mW (varies by model size and batch)
-- **Cooldown**: 2,000-10,000 mW (gradual return to baseline)
-
-### Factors Affecting Power Consumption
-
-- **Model Size**: Larger models (7B, 13B+) consume more power
-- **Quantization**: Lower precision (Q4, Q5) reduces power vs FP16
-- **Context Length**: Longer prompts increase processing power
-- **Response Length**: More tokens generated = more power consumed
-- **System Load**: Background processes affect baseline
-
-## Troubleshooting
-
-### "sudo: a password is required"
-- The script must be run with sudo for powermetrics access
-- Run: `sudo python3 lm_studio_power_benchmark.py`
-
-### "Failed to connect to LM Studio"
-- Verify LM Studio is running
-- Ensure local server is started (green button in LM Studio)
-- Check server is on default port 1234
-- Try loading a model first in LM Studio GUI
-
-### "lmstudio package not found"
-- Install the SDK: `pip install lmstudio`
-- Verify installation: `python3 -c "import lmstudio"`
-
-### No power samples collected
-- Verify you have sudo access
-- Check that powermetrics is available: `which powermetrics`
-- On non-Apple Silicon Macs, powermetrics may have limited functionality
-
-### High baseline power
-- Close background applications
-- Wait for system to stabilize before running benchmark
-- Consider increasing baseline duration: `--baseline 20`
-
-## Standalone Powermetrics Tool
-
-### Basic Power Monitoring
-```bash
-# Stream 60 samples at 1s intervals (default)
-sudo python3 scripts/powermetrics_analyzer.py
-
-# Custom duration and interval
-sudo python3 scripts/powermetrics_analyzer.py --interval 500 --samples 120
-
-# Batch mode (wait for completion)
-sudo python3 scripts/powermetrics_analyzer.py --mode batch --samples 30
+### Power CSV Output
+```csv
+timestamp,elapsed_ms,cpu_power_mw,gpu_power_mw,ane_power_mw,combined_power_mw
+Sat Nov  8 14:30:01 2025 -0700,1012.83,9553,13,0,9566
+Sat Nov  8 14:30:02 2025 -0700,1015.22,12420,25,5,12450
+...
 ```
 
-### Output
-- CSV file with time-series power data
-- Summary statistics (min/max/avg)
-- Supports both streaming and batch modes
+## Usage Examples
 
-## Example Workflow
-
+### Basic Benchmark
 ```bash
-# 1. Install dependencies
-pip install lmstudio
+# Terminal 1
+sudo python3 scripts/powermetrics_analyzer.py --output power.csv
 
-# 2. Start LM Studio and load a model
-
-# 3. Run quick test (reduced timing for testing)
-sudo python3 scripts/lm_studio_power_benchmark.py \
-  --baseline 5 \
-  --cooldown 5 \
-  --output test_run.json
-
-# 4. View results
-cat test_run.json | python3 -m json.tool
-
-# 5. Run full benchmark with production settings
-sudo python3 scripts/lm_studio_power_benchmark.py \
-  --baseline 15 \
-  --cooldown 15 \
-  --output production_benchmark.json
+# Terminal 2
+python3 scripts/lm_studio_power_benchmark.py --output benchmark.json
 ```
+
+### Longer Monitoring Session
+```bash
+# Terminal 1 - collect 10 minutes of power data
+sudo python3 scripts/powermetrics_analyzer.py --samples 600 --output power_10min.csv
+
+# Terminal 2 - run benchmark with custom pause between prompts
+python3 scripts/lm_studio_power_benchmark.py --pause 10 --output benchmark.json
+```
+
+### Specific Model
+```bash
+# Terminal 2 only needs to specify model
+python3 scripts/lm_studio_power_benchmark.py --model qwen/qwen3-4b-2507
+```
+
+## Command Line Options
+
+### powermetrics_analyzer.py
+```bash
+sudo python3 powermetrics_analyzer.py [OPTIONS]
+
+Options:
+  --mode {stream,batch}    Processing mode (default: stream)
+  --interval MS            Sampling interval in ms (default: 1000)
+  --samples N              Number of samples (default: 60)
+  --output FILE            Output CSV path
+```
+
+### lm_studio_power_benchmark.py
+```bash
+python3 lm_studio_power_benchmark.py [OPTIONS]
+
+Options:
+  --model MODEL            LM Studio model identifier
+  --pause SECONDS          Pause between prompts (default: 5)
+  --output FILE            Output JSON path
+```
+
+## Correlating Timestamps
+
+The benchmark JSON contains ISO 8601 timestamps with microsecond precision:
+```
+prompt_submit_time: "2025-11-08T14:30:01.234567"
+response_complete_time: "2025-11-08T14:30:02.123456"
+```
+
+The power CSV contains human-readable timestamps:
+```
+Sat Nov  8 14:30:01 2025 -0700
+```
+
+To correlate:
+1. Parse timestamps from both files
+2. Find power samples between `prompt_submit_time` and `response_complete_time`
+3. Calculate average/min/max power during inference
 
 ## Tips for Accurate Measurements
 
-1. **Minimize Background Activity**
-   - Close unnecessary applications
-   - Disable automatic backups during testing
-   - Stop browser and other heavy processes
+### Before Running
+1. **Close unnecessary applications** - Minimize background activity
+2. **Disable automatic updates** - Prevent system tasks during benchmark
+3. **Let system stabilize** - Wait a minute after opening LM Studio
+4. **Plugin power** - Use AC power for consistent performance
 
-2. **Thermal Considerations**
-   - Allow system to cool between benchmarks
-   - Monitor system temperature
-   - Consider ambient temperature effects
+### During Measurement
+1. **Start power monitoring first** - Get baseline before benchmark
+2. **Don't interact with system** - Avoid mouse/keyboard during benchmark
+3. **Monitor temperature** - High temp can affect power/performance
+4. **Run multiple iterations** - Average results across runs
 
-3. **Consistency**
-   - Use same power settings (plugged in vs battery)
-   - Run multiple iterations and average results
-   - Document system state (CPU usage, temp, etc.)
+### After Measurement
+1. **Verify sample counts** - Check power CSV has expected number of samples
+2. **Check for anomalies** - Look for unexpected power spikes
+3. **Document conditions** - Note model, quant, temp, etc.
 
-4. **Model Selection**
-   - Test same model with different quantizations
-   - Compare similar-sized models
-   - Document model parameters (size, quant, context)
+## Troubleshooting
+
+### "powermetrics must be invoked as the superuser"
+- Run powermetrics_analyzer.py with `sudo`
+- Benchmark script does not need sudo
+
+### "Failed to connect to LM Studio"
+- Verify LM Studio is running
+- Ensure local server is started (green button)
+- Check server is on port 1234
+
+### "lmstudio package not found"
+- Install: `pip install lmstudio`
+- Verify: `python3 -c "import lmstudio"`
+
+### No power samples in CSV
+- Verify you ran powermetrics_analyzer.py with sudo
+- Check that powermetrics is available: `which powermetrics`
+- On non-Apple Silicon Macs, power metrics may be limited
+
+### Timestamps don't align
+- Ensure system clocks are synchronized
+- Check timezone matches between files
+- Verify both scripts ran on same machine
+
+## Example Analysis Workflow
+
+```bash
+# 1. Start power monitoring
+sudo python3 scripts/powermetrics_analyzer.py --samples 600 --output power.csv &
+POWER_PID=$!
+
+# 2. Wait for baseline
+sleep 10
+
+# 3. Run benchmark
+python3 scripts/lm_studio_power_benchmark.py --output benchmark.json
+
+# 4. Let cooldown complete
+sleep 10
+
+# 5. Stop power monitoring
+kill $POWER_PID
+
+# 6. Analyze results
+python3 scripts/correlate_power_timing.py power.csv benchmark.json
+```
+
+## Advanced Usage
+
+### Custom Prompts
+Edit `BENCHMARK_PROMPTS` dict in `lm_studio_power_benchmark.py` to add your own test cases.
+
+### Streaming vs Batch Power Collection
+```bash
+# Stream mode (default) - see real-time samples
+sudo python3 scripts/powermetrics_analyzer.py --mode stream
+
+# Batch mode - wait for all samples then process
+sudo python3 scripts/powermetrics_analyzer.py --mode batch
+```
+
+### High Frequency Sampling
+```bash
+# Sample every 500ms for detailed power profile
+sudo python3 scripts/powermetrics_analyzer.py --interval 500 --samples 1200
+```
 
 ## License
 
@@ -305,3 +283,9 @@ MIT License - See main repository LICENSE file
 ## Contributing
 
 Contributions welcome! Please test thoroughly on Apple Silicon hardware before submitting PRs.
+
+## Related Tools
+
+- **powermetrics** - macOS system utility for power measurement
+- **LM Studio** - Local LLM inference platform
+- **lmstudio-python** - Official Python SDK for LM Studio
