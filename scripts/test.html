@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text Optimizer Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            margin: 10px 0;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Text Optimizer Test</h1>
+
+    <form id="optimizerForm">
+        <label for="inputText">Input Text:</label>
+        <textarea id="inputText" placeholder="Enter text to optimize..."></textarea>
+
+        <button type="submit">Optimize</button>
+
+        <label for="outputText">Optimized Text:</label>
+        <textarea id="outputText" readonly placeholder="Optimized output will appear here..."></textarea>
+    </form>
+
+    <script type="module">
+        import { optimize_prompt } from './optimizer.js';
+
+        const form = document.getElementById('optimizerForm');
+        const inputText = document.getElementById('inputText');
+        const outputText = document.getElementById('outputText');
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = inputText.value;
+            const optimized = optimize_prompt(input);
+            outputText.value = optimized;
+        });
+    </script>
+</body>
+</html>
