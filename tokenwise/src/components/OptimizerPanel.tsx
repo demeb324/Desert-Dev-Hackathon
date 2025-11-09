@@ -1,39 +1,138 @@
-import {FaMagic, FaCopy, FaCheck} from "react-icons/fa";
-import type {TokenOptimizerProps} from "../types/type.tsx";
-import {optimize_prompt} from "../../../scripts/optimizer.ts";
-import {useState} from "react";
-import {estimateTokens} from "../utils/tokenUtils.tsx";
+import { FaMagic, FaCopy, FaCheck, FaPlay } from "react-icons/fa";
+import type { TokenOptimizerProps } from "../types/type.tsx";
+import { useState, useEffect } from "react";
+import { lmStudioService } from "@/services/lmStudioService";
+import { LoadingSpinner } from "./LoadingSpinner";
+import { ErrorAlert } from "./ErrorAlert";
 
 const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
-    // Logic to process/optimize the tokenInput goes here
-   // const optimizedResult = tokenInput ? tokenInput.toUpperCase() : ' Optimized prompt preview shown here...'; // Example optimization
-    const optimizedResult=  tokenInput ? optimize_prompt(tokenInput) : ' Optimized prompt preview shown here...';
-
-    const beforeTokens = estimateTokens(tokenInput)
-    const afterTokens = estimateTokens(optimizedResult)
-   // State to manage the visual feedback (e.g., change icon/text after successful copy)
+    const [optimizedResult, setOptimizedResult] = useState<string>("");
+    const [beforeTokens, setBeforeTokens] = useState<number>(0);
+    const [afterTokens, setAfterTokens] = useState<number>(0);
+    const [isOptimizing, setIsOptimizing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [isCopied, setIsCopied] = useState(false);
+    const [isCountingTokens, setIsCountingTokens] = useState(false);
 
-    // 1. Define the asynchronous copy function
-    const handleCopy = async () => {
+    // State for execution feature
+    const [llmResponse, setLlmResponse] = useState<string>("");
+    const [isExecuting, setIsExecuting] = useState(false);
+    const [responseTokens, setResponseTokens] = useState<number>(0);
+    const [executeError, setExecuteError] = useState<string | null>(null);
+    const [isResponseCopied, setIsResponseCopied] = useState(false);
+
+    // Update before token count when input changes
+    useEffect(() => {
+        if (!tokenInput || tokenInput.trim() === "") {
+            setBeforeTokens(0);
+            return;
+        }
+
+        const updateTokenCount = async () => {
+            setIsCountingTokens(true);
+            try {
+                const count = await lmStudioService.getTokenCount(tokenInput);
+                setBeforeTokens(count);
+            } catch (err) {
+                console.error("Failed to count tokens:", err);
+                // Silently fail for token counting - not critical
+            } finally {
+                setIsCountingTokens(false);
+            }
+        };
+
+        updateTokenCount();
+    }, [tokenInput]);
+
+    // Handle optimization
+    const handleOptimize = async () => {
+        if (!tokenInput || tokenInput.trim() === "") {
+            setError("Please enter a prompt to optimize");
+            return;
+        }
+
+        setIsOptimizing(true);
+        setError(null);
+        // Clear previous execution results when re-optimizing
+        setLlmResponse("");
+        setResponseTokens(0);
+        setExecuteError(null);
+
         try {
-            // Use the browser's Clipboard API to write the text
-            await navigator.clipboard.writeText(optimizedResult);
+            // Optimize the prompt
+            const optimized = await lmStudioService.optimizePrompt(tokenInput);
+            setOptimizedResult(optimized);
 
-            // 2. Provide feedback to the user
-            setIsCopied(true);
-
-            // Reset the feedback state after a short delay
-            setTimeout(() => {
-                setIsCopied(false);
-            }, 2000);
-
-        } catch (err) {
-            console.error('Failed to copy text: ', err);
-            // Optional: Add an alert or visual indicator for an error
-            alert('Failed to copy prompt. Please try again or copy manually.');
+            // Get token count for optimized version
+            const count = await lmStudioService.getTokenCount(optimized);
+            setAfterTokens(count);
+        } catch (err: any) {
+            console.error("Optimization failed:", err);
+            setError(err.message || "Failed to optimize prompt. Please try again.");
+            setOptimizedResult("");
+            setAfterTokens(0);
+        } finally {
+            setIsOptimizing(false);
         }
     };
+
+    // Handle executing the optimized prompt
+    const handleExecute = async () => {
+        if (!optimizedResult || optimizedResult.trim() === "") {
+            setExecuteError("Please optimize a prompt first");
+            return;
+        }
+
+        setIsExecuting(true);
+        setExecuteError(null);
+
+        try {
+            // Execute the optimized prompt
+            const response = await lmStudioService.executePrompt(optimizedResult);
+            setLlmResponse(response);
+
+            // Get token count for the response
+            const count = await lmStudioService.getTokenCount(response);
+            setResponseTokens(count);
+        } catch (err: any) {
+            console.error("Execution failed:", err);
+            setExecuteError(err.message || "Failed to execute prompt. Please try again.");
+            setLlmResponse("");
+            setResponseTokens(0);
+        } finally {
+            setIsExecuting(false);
+        }
+    };
+
+    // Handle copy to clipboard
+    const handleCopy = async () => {
+        if (!optimizedResult) return;
+
+        try {
+            await navigator.clipboard.writeText(optimizedResult);
+            setIsCopied(true);
+            setTimeout(() => setIsCopied(false), 2000);
+        } catch (err) {
+            console.error("Failed to copy text:", err);
+            alert("Failed to copy prompt. Please try again or copy manually.");
+        }
+    };
+
+    // Handle copy response to clipboard
+    const handleCopyResponse = async () => {
+        if (!llmResponse) return;
+
+        try {
+            await navigator.clipboard.writeText(llmResponse);
+            setIsResponseCopied(true);
+            setTimeout(() => setIsResponseCopied(false), 2000);
+        } catch (err) {
+            console.error("Failed to copy response:", err);
+            alert("Failed to copy response. Please try again or copy manually.");
+        }
+    };
+
+    const tokenReduction = beforeTokens > 0 ? Math.round(((beforeTokens - afterTokens) / beforeTokens) * 100) : 0;
 
     return (
         <div className="bg-gray-800 p-5 rounded-2xl shadow-xl">
@@ -41,34 +140,140 @@ const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
                 <FaMagic /> Optimizer
             </h2>
 
+            {/* Error Alert */}
+            {error && (
+                <ErrorAlert
+                    error={error}
+                    onRetry={handleOptimize}
+                    onDismiss={() => setError(null)}
+                    className="mb-4"
+                />
+            )}
+
+            {/* Token Count Table */}
             <table className="w-full text-sm text-gray-300 mb-3">
                 <thead>
-                <tr className="border-b border-gray-600">
-                    <th className="text-left py-1">Section</th>
-                    <th>Before</th>
-                    <th>After</th>
-                </tr>
+                    <tr className="border-b border-gray-600">
+                        <th className="text-left py-1">Section</th>
+                        <th>Before</th>
+                        <th>After</th>
+                        <th>Saved</th>
+                    </tr>
                 </thead>
                 <tbody>
-                <tr>
-                    <td>Prompt</td>
-                    <td className="text-center">{beforeTokens}</td>
-                    <td className="text-green-400 text-center">{afterTokens}</td>
-                </tr>
+                    <tr>
+                        <td>Tokens</td>
+                        <td className="text-center">
+                            {isCountingTokens ? (
+                                <LoadingSpinner size="sm" />
+                            ) : (
+                                beforeTokens
+                            )}
+                        </td>
+                        <td className="text-green-400 text-center">{afterTokens}</td>
+                        <td className="text-cyan-400 text-center">
+                            {afterTokens > 0 && tokenReduction >= 0 ? `${tokenReduction}%` : "-"}
+                        </td>
+                    </tr>
                 </tbody>
             </table>
 
-            <div className="bg-gray-900 rounded-lg p-3 text-gray-400 text-sm">
-               <strong>{optimizedResult}</strong>
+            {/* Optimized Result Display */}
+            <div className="bg-gray-900 rounded-lg p-3 text-gray-400 text-sm min-h-[100px] flex items-center justify-center relative">
+                {isOptimizing ? (
+                    <LoadingSpinner text="Optimizing prompt..." />
+                ) : optimizedResult ? (
+                    <strong className="text-gray-200">{optimizedResult}</strong>
+                ) : (
+                    <span className="text-gray-500 italic">
+                        Click "Optimize" to process your prompt
+                    </span>
+                )}
             </div>
 
-            <button className="mt-3 w-full bg-pink-500 hover:bg-pink-600 text-black font-semibold py-2 rounded-lg flex items-center justify-center gap-2" onClick={handleCopy}>
-                {/* Conditionally show the Check icon on success */}
-                {isCopied ? <FaCheck /> : <FaCopy />}
+            {/* Action Buttons */}
+            <div className="mt-3 flex gap-2">
+                <button
+                    className="flex-1 bg-cyan-500 hover:bg-cyan-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                    onClick={handleOptimize}
+                    disabled={isOptimizing || !tokenInput || tokenInput.trim() === ""}
+                >
+                    <FaMagic />
+                    {isOptimizing ? "Optimizing..." : "Optimize"}
+                </button>
 
-                {/* Conditionally change the button text */}
-                {isCopied ? 'Copied!' : 'Copy Optimized Prompt'}
-            </button>
+                <button
+                    className="flex-1 bg-pink-500 hover:bg-pink-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                    onClick={handleCopy}
+                    disabled={!optimizedResult || isOptimizing}
+                >
+                    {isCopied ? <FaCheck /> : <FaCopy />}
+                    {isCopied ? "Copied!" : "Copy"}
+                </button>
+            </div>
+
+            {/* Execute Button */}
+            <div className="mt-3">
+                <button
+                    className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                    onClick={handleExecute}
+                    disabled={isExecuting || !optimizedResult || isOptimizing}
+                >
+                    <FaPlay />
+                    {isExecuting ? "Running..." : "Run Optimized Prompt"}
+                </button>
+            </div>
+
+            {/* Execute Error Alert */}
+            {executeError && (
+                <div className="mt-3">
+                    <ErrorAlert
+                        error={executeError}
+                        onRetry={handleExecute}
+                        onDismiss={() => setExecuteError(null)}
+                    />
+                </div>
+            )}
+
+            {/* LLM Response Section */}
+            {(isExecuting || llmResponse) && (
+                <div className="mt-4 border-t border-gray-700 pt-4">
+                    <h3 className="text-md font-semibold mb-2 text-green-300">
+                        LLM Response:
+                    </h3>
+
+                    {/* Response Display */}
+                    <div className="bg-gray-900 rounded-lg p-4 text-gray-300 text-sm min-h-[120px] flex items-center justify-center">
+                        {isExecuting ? (
+                            <LoadingSpinner text="Executing optimized prompt..." />
+                        ) : llmResponse ? (
+                            <div className="w-full">
+                                <p className="whitespace-pre-wrap">{llmResponse}</p>
+                            </div>
+                        ) : (
+                            <span className="text-gray-500 italic">
+                                No response yet
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Response Token Count and Copy Button */}
+                    {llmResponse && (
+                        <div className="mt-2 flex items-center justify-between">
+                            <span className="text-xs text-gray-400">
+                                Response tokens: <span className="text-green-400 font-semibold">{responseTokens}</span>
+                            </span>
+                            <button
+                                className="bg-green-500 hover:bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded flex items-center gap-1 transition-colors"
+                                onClick={handleCopyResponse}
+                            >
+                                {isResponseCopied ? <FaCheck /> : <FaCopy />}
+                                {isResponseCopied ? "Copied!" : "Copy Response"}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

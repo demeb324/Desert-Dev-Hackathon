@@ -171,6 +171,90 @@ export class LMStudioService {
   }
 
   /**
+   * Execute a prompt and get the LLM's response
+   *
+   * @param prompt - The prompt to execute
+   * @returns The LLM's response text
+   */
+  async executePrompt(prompt: string): Promise<string> {
+    if (!prompt || prompt.trim() === '') {
+      throw this.createError('Cannot execute empty prompt');
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+      const requestBody: ChatCompletionRequest = {
+        model: LM_STUDIO_MODEL,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.7, // Standard temperature for generation
+        max_tokens: 2000, // Allow longer responses
+      };
+
+      console.log('[LM Studio] Executing prompt:', {
+        url: `${this.baseURL}/chat/completions`,
+        model: requestBody.model,
+        promptLength: prompt.length,
+      });
+
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[LM Studio] API error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText,
+        });
+        throw this.createError(
+          `LM Studio API error: ${response.status} ${response.statusText}`,
+          response.status.toString(),
+          errorText
+        );
+      }
+
+      const data: ChatCompletionResponse = await response.json();
+
+      if (!data.choices || data.choices.length === 0) {
+        throw this.createError('No response from LM Studio');
+      }
+
+      const llmResponse = data.choices[0].message.content.trim();
+
+      if (!llmResponse) {
+        throw this.createError('LM Studio returned empty response');
+      }
+
+      return llmResponse;
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw this.createError('Request timed out. Please try again.');
+        }
+        if (error.message.includes('Failed to fetch')) {
+          throw this.createError('Cannot connect to LM Studio. Please ensure LM Studio is running on port 1234 and a model is loaded.');
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Get accurate token count for text using LM Studio
    *
    * @param text - The text to count tokens for
