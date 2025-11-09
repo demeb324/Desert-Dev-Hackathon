@@ -1,11 +1,15 @@
 import { FaMagic, FaCopy, FaCheck, FaPlay } from "react-icons/fa";
 import type { TokenOptimizerProps } from "../types/type.tsx";
-import { useState, useEffect } from "react";
+import { useState, useEffect, forwardRef, useImperativeHandle } from "react";
 import { lmStudioService } from "@/services/lmStudioService";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { ErrorAlert } from "./ErrorAlert";
 
-const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
+export interface OptimizerPanelHandle {
+    autoOptimizeAndExecute: () => Promise<void>;
+}
+
+const OptimizerPanel = forwardRef<OptimizerPanelHandle, TokenOptimizerProps>(({ tokenInput }, ref) => {
     const [optimizedResult, setOptimizedResult] = useState<string>("");
     const [beforeTokens, setBeforeTokens] = useState<number>(0);
     const [afterTokens, setAfterTokens] = useState<number>(0);
@@ -20,6 +24,58 @@ const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
     const [responseTokens, setResponseTokens] = useState<number>(0);
     const [executeError, setExecuteError] = useState<string | null>(null);
     const [isResponseCopied, setIsResponseCopied] = useState(false);
+
+    // Workflow step indicator
+    const [workflowStep, setWorkflowStep] = useState<'idle' | 'optimizing' | 'executing' | 'complete'>('idle');
+
+    // Expose autoOptimizeAndExecute method to parent via ref
+    useImperativeHandle(ref, () => ({
+        autoOptimizeAndExecute: async () => {
+            if (!tokenInput || tokenInput.trim() === "") {
+                setError("No prompt to analyze");
+                return;
+            }
+
+            try {
+                // Step 1: Optimize
+                setWorkflowStep('optimizing');
+                setIsOptimizing(true);
+                setError(null);
+                setExecuteError(null);
+                setLlmResponse("");
+                setResponseTokens(0);
+
+                const optimized = await lmStudioService.optimizePrompt(tokenInput);
+                setOptimizedResult(optimized);
+
+                const count = await lmStudioService.getTokenCount(optimized);
+                setAfterTokens(count);
+                setIsOptimizing(false);
+
+                // Step 2: Execute
+                setWorkflowStep('executing');
+                setIsExecuting(true);
+
+                const response = await lmStudioService.executePrompt(optimized);
+                setLlmResponse(response);
+
+                const respCount = await lmStudioService.getTokenCount(response);
+                setResponseTokens(respCount);
+                setIsExecuting(false);
+
+                setWorkflowStep('complete');
+
+                // Reset to idle after a moment
+                setTimeout(() => setWorkflowStep('idle'), 2000);
+            } catch (err: any) {
+                console.error("Auto-analysis failed:", err);
+                setIsOptimizing(false);
+                setIsExecuting(false);
+                setWorkflowStep('idle');
+                setError(err.message || "Auto-analysis failed. Please try again.");
+            }
+        }
+    }));
 
     // Update before token count when input changes
     useEffect(() => {
@@ -178,6 +234,15 @@ const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
                 </tbody>
             </table>
 
+            {/* Workflow Step Indicator */}
+            {workflowStep !== 'idle' && (
+                <div className="mb-2 text-sm text-cyan-400 animate-pulse flex items-center gap-2">
+                    {workflowStep === 'optimizing' && '🔄 Step 1/2: Optimizing prompt...'}
+                    {workflowStep === 'executing' && '🔄 Step 2/2: Running optimized prompt...'}
+                    {workflowStep === 'complete' && '✅ Analysis complete!'}
+                </div>
+            )}
+
             {/* Optimized Result Display */}
             <div className="bg-gray-900 rounded-lg p-3 text-gray-400 text-sm min-h-[100px] flex items-center justify-center relative">
                 {isOptimizing ? (
@@ -276,6 +341,8 @@ const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
             )}
         </div>
     );
-};
+});
+
+OptimizerPanel.displayName = 'OptimizerPanel';
 
 export default OptimizerPanel;

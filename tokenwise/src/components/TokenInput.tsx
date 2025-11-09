@@ -99,7 +99,7 @@ const TokenInput: React.FC<TokenInputProps> = ({ onInputReady }) => {
                     onClick={handleAnalyze}
                     disabled={!inputValue || inputValue.trim() === ""}
                 >
-                    Analyze
+                    Analyze & Run
                 </button>
             </div>
 
