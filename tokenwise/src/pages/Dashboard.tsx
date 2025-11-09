@@ -1,6 +1,7 @@
 import TokenInput from "../components/TokenInput";
 import TokenAnalyzer from "../components/TokenAnalyzer";
-import OptimizerPanel, { OptimizerPanelHandle } from "../components/OptimizerPanel";
+import OptimizerPanel from "../components/OptimizerPanel";
+import type { OptimizerPanelHandle } from "../components/OptimizerPanel";
 import {useState, useRef} from "react";
 import type {TokenOptimizeInput} from "../types/type.tsx";
 
