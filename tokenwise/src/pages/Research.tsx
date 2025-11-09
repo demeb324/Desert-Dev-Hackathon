@@ -46,7 +46,7 @@ export default function Research() {
               className={`flex-1 p-6 rounded-2xl border-2 transition-all duration-300 text-left ${
                 selectedReport === report.id
                   ? 'bg-emerald-500 bg-opacity-20 border-emerald-400 shadow-lg shadow-emerald-400/30'
-                  : 'bg-white bg-opacity-5 border-white border-opacity-20 hover:border-cyan-400'
+                  : 'bg-gray-800 bg-opacity-50 border-gray-700 hover:border-cyan-400 hover:bg-opacity-70'
               }`}
             >
               <div className="text-4xl mb-3">{report.icon}</div>
