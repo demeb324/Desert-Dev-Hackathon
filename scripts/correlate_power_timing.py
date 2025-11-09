@@ -39,9 +39,9 @@ except ImportError:
 @dataclass
 class PowerStats:
     """Power consumption statistics."""
-    min_mw: int
-    max_mw: int
-    avg_mw: float
+    min_w: float
+    max_w: float
+    avg_w: float
     samples: int
 
 
@@ -51,8 +51,8 @@ class PowerAnalysis:
     baseline: Optional[PowerStats]
     inference: Optional[PowerStats]
     cooldown: Optional[PowerStats]
-    peak_power_mw: Optional[int]
-    energy_estimate_mj: Optional[float]  # millijoules
+    peak_power_w: Optional[float]
+    energy_estimate_kwh: Optional[float]  # kilowatt-hours
 
 
 def parse_csv_timestamp(timestamp_str: str) -> datetime:
@@ -109,10 +109,10 @@ def load_power_data(csv_file: str) -> List[Dict]:
             try:
                 sample = {
                     'timestamp': parse_csv_timestamp(row['timestamp']),
-                    'cpu_power_mw': int(row['cpu_power_mw']),
-                    'gpu_power_mw': int(row['gpu_power_mw']),
-                    'ane_power_mw': int(row['ane_power_mw']),
-                    'combined_power_mw': int(row['combined_power_mw'])
+                    'cpu_power_w': int(row['cpu_power_mw']) / 1000.0,
+                    'gpu_power_w': int(row['gpu_power_mw']) / 1000.0,
+                    'ane_power_w': int(row['ane_power_mw']) / 1000.0,
+                    'combined_power_w': int(row['combined_power_mw']) / 1000.0
                 }
                 samples.append(sample)
             except (ValueError, KeyError) as e:
@@ -171,12 +171,12 @@ def calculate_power_stats(samples: List[Dict]) -> Optional[PowerStats]:
     if not samples:
         return None
 
-    combined_powers = [s['combined_power_mw'] for s in samples]
+    combined_powers = [s['combined_power_w'] for s in samples]
 
     return PowerStats(
-        min_mw=min(combined_powers),
-        max_mw=max(combined_powers),
-        avg_mw=sum(combined_powers) / len(combined_powers),
+        min_w=min(combined_powers),
+        max_w=max(combined_powers),
+        avg_w=sum(combined_powers) / len(combined_powers),
         samples=len(combined_powers)
     )
 
@@ -234,22 +234,23 @@ def analyze_prompt_power(
     cooldown_stats = calculate_power_stats(cooldown_samples)
 
     # Calculate peak power
-    all_inference_powers = [s['combined_power_mw'] for s in inference_samples]
+    all_inference_powers = [s['combined_power_w'] for s in inference_samples]
     peak_power = max(all_inference_powers) if all_inference_powers else None
 
     # Estimate energy consumption (Power × Time = Energy)
-    # Energy in millijoules = Average Power (mW) × Duration (s)
+    # Energy in kWh = Average Power (W) × Duration (s) / 3,600,000
+    # (since W × s = J, and 1 kWh = 3,600,000 J)
     energy_estimate = None
     if inference_stats:
         inference_duration_s = timing['inference_duration_s']
-        energy_estimate = inference_stats.avg_mw * inference_duration_s
+        energy_estimate = inference_stats.avg_w * inference_duration_s / 3_600_000
 
     return PowerAnalysis(
         baseline=baseline_stats,
         inference=inference_stats,
         cooldown=cooldown_stats,
-        peak_power_mw=peak_power,
-        energy_estimate_mj=energy_estimate
+        peak_power_w=peak_power,
+        energy_estimate_kwh=energy_estimate
     )
 
 
@@ -297,8 +298,8 @@ def analyze_prompt_power_with_optimization(
             reference_timezone
         )
 
-        if opt_analysis and opt_analysis.energy_estimate_mj:
-            opt_energy = opt_analysis.energy_estimate_mj
+        if opt_analysis and opt_analysis.energy_estimate_kwh:
+            opt_energy = opt_analysis.energy_estimate_kwh
 
     # Analyze execution window (the actual benchmark run)
     exec_analysis = analyze_prompt_power(
@@ -310,21 +311,21 @@ def analyze_prompt_power_with_optimization(
     )
 
     # Calculate combined energy
-    exec_energy = exec_analysis.energy_estimate_mj if exec_analysis.energy_estimate_mj else 0
+    exec_energy = exec_analysis.energy_estimate_kwh if exec_analysis.energy_estimate_kwh else 0
     total_energy = exec_energy + opt_energy
 
     # Return comprehensive analysis
     return {
         'optimization_analysis': asdict(opt_analysis) if opt_analysis else None,
         'execution_analysis': asdict(exec_analysis),
-        'combined_energy_mj': total_energy,
-        'optimization_overhead_mj': opt_energy,
+        'combined_energy_kwh': total_energy,
+        'optimization_overhead_kwh': opt_energy,
         # Keep these for backward compatibility with existing code
         'baseline': asdict(exec_analysis.baseline) if exec_analysis.baseline else None,
         'inference': asdict(exec_analysis.inference) if exec_analysis.inference else None,
         'cooldown': asdict(exec_analysis.cooldown) if exec_analysis.cooldown else None,
-        'peak_power_mw': exec_analysis.peak_power_mw,
-        'energy_estimate_mj': total_energy  # This is now the COMBINED energy
+        'peak_power_w': exec_analysis.peak_power_w,
+        'energy_estimate_kwh': total_energy  # This is now the COMBINED energy
     }
 
 
@@ -393,29 +394,29 @@ def correlate_power_timing(
 
         # Print summary
         if power_analysis.inference:
-            print(f"      Inference: {power_analysis.inference.avg_mw:.0f} mW avg, "
-                  f"Peak: {power_analysis.peak_power_mw} mW, "
-                  f"Energy: {power_analysis.energy_estimate_mj:.1f} mJ")
+            print(f"      Inference: {power_analysis.inference.avg_w:.3f} W avg, "
+                  f"Peak: {power_analysis.peak_power_w:.3f} W, "
+                  f"Energy: {power_analysis.energy_estimate_kwh:.6e} kWh")
         else:
             print(f"      WARNING: No power samples found during inference!")
 
     # Calculate summary statistics
     total_energy = sum(
-        p['power_analysis']['energy_estimate_mj']
+        p['power_analysis']['energy_estimate_kwh']
         for p in enhanced_prompts
-        if p['power_analysis']['energy_estimate_mj'] is not None
+        if p['power_analysis']['energy_estimate_kwh'] is not None
     )
 
     avg_inference_power = sum(
-        p['power_analysis']['inference']['avg_mw']
+        p['power_analysis']['inference']['avg_w']
         for p in enhanced_prompts
         if p['power_analysis']['inference'] is not None
     ) / len([p for p in enhanced_prompts if p['power_analysis']['inference'] is not None])
 
     peak_power_overall = max(
-        p['power_analysis']['peak_power_mw']
+        p['power_analysis']['peak_power_w']
         for p in enhanced_prompts
-        if p['power_analysis']['peak_power_mw'] is not None
+        if p['power_analysis']['peak_power_w'] is not None
     )
 
     # Build enhanced report
@@ -430,9 +431,9 @@ def correlate_power_timing(
         },
         'summary': {
             **benchmark_data['summary'],
-            'total_energy_mj': total_energy,
-            'avg_inference_power_mw': avg_inference_power,
-            'peak_power_mw': peak_power_overall,
+            'total_energy_kwh': total_energy,
+            'avg_inference_power_w': avg_inference_power,
+            'peak_power_w': peak_power_overall,
         },
         'prompts': enhanced_prompts
     }
@@ -489,11 +490,11 @@ def correlate_comparison_mode(
 
                 # Print summary with optimization overhead
                 if power_analysis.get('inference'):
-                    opt_overhead = power_analysis.get('optimization_overhead_mj', 0)
-                    total_energy = power_analysis.get('combined_energy_mj', 0)
-                    print(f"        Execution: {power_analysis['inference']['avg_mw']:.0f} mW avg")
-                    print(f"        Optimization overhead: {opt_overhead:.1f} mJ")
-                    print(f"        Total energy (opt + exec): {total_energy:.1f} mJ")
+                    opt_overhead = power_analysis.get('optimization_overhead_kwh', 0)
+                    total_energy = power_analysis.get('combined_energy_kwh', 0)
+                    print(f"        Execution: {power_analysis['inference']['avg_w']:.3f} W avg")
+                    print(f"        Optimization overhead: {opt_overhead:.6e} kWh")
+                    print(f"        Total energy (opt + exec): {total_energy:.6e} kWh")
             else:
                 # Standard analysis for original and rule_optimized
                 power_analysis = analyze_prompt_power(
@@ -510,8 +511,8 @@ def correlate_comparison_mode(
 
                 # Print summary
                 if power_analysis.inference:
-                    print(f"        Power: {power_analysis.inference.avg_mw:.0f} mW avg, "
-                          f"Energy: {power_analysis.energy_estimate_mj:.1f} mJ")
+                    print(f"        Power: {power_analysis.inference.avg_w:.3f} W avg, "
+                          f"Energy: {power_analysis.energy_estimate_kwh:.6e} kWh")
 
         enhanced_group = group.copy()
         enhanced_group['versions'] = enhanced_versions
@@ -527,12 +528,12 @@ def correlate_comparison_mode(
         if not version_prompts:
             return None
 
-        # For llm_optimized, energy_estimate_mj includes BOTH optimization and execution
+        # For llm_optimized, energy_estimate_kwh includes BOTH optimization and execution
         # For others, it's just execution
         total_energy = sum(
-            v['power_analysis']['energy_estimate_mj']
+            v['power_analysis']['energy_estimate_kwh']
             for v in version_prompts
-            if v['power_analysis']['energy_estimate_mj'] is not None
+            if v['power_analysis']['energy_estimate_kwh'] is not None
         )
 
         # Calculate optimization overhead (only for llm_optimized)
@@ -540,33 +541,33 @@ def correlate_comparison_mode(
         execution_only_energy = 0
         if version_name == 'llm_optimized':
             optimization_overhead = sum(
-                v['power_analysis'].get('optimization_overhead_mj', 0)
+                v['power_analysis'].get('optimization_overhead_kwh', 0)
                 for v in version_prompts
             )
             execution_only_energy = total_energy - optimization_overhead
 
         valid_power = [v for v in version_prompts if v['power_analysis']['inference'] is not None]
         avg_power = sum(
-            v['power_analysis']['inference']['avg_mw']
+            v['power_analysis']['inference']['avg_w']
             for v in valid_power
         ) / len(valid_power) if valid_power else None
 
-        valid_peak = [v for v in version_prompts if v['power_analysis']['peak_power_mw'] is not None]
+        valid_peak = [v for v in version_prompts if v['power_analysis']['peak_power_w'] is not None]
         peak_power = max(
-            v['power_analysis']['peak_power_mw']
+            v['power_analysis']['peak_power_w']
             for v in valid_peak
         ) if valid_peak else None
 
         stats = {
-            'total_energy_mj': total_energy,
-            'avg_inference_power_mw': avg_power,
-            'peak_power_mw': peak_power,
+            'total_energy_kwh': total_energy,
+            'avg_inference_power_w': avg_power,
+            'peak_power_w': peak_power,
         }
 
         # Add optimization breakdown for llm_optimized
         if version_name == 'llm_optimized':
-            stats['optimization_overhead_mj'] = optimization_overhead
-            stats['execution_only_energy_mj'] = execution_only_energy
+            stats['optimization_overhead_kwh'] = optimization_overhead
+            stats['execution_only_energy_kwh'] = execution_only_energy
 
         return stats
 
@@ -578,9 +579,9 @@ def correlate_comparison_mode(
 
     # Calculate overall totals
     total_energy_all = sum(
-        v['power_analysis']['energy_estimate_mj']
+        v['power_analysis']['energy_estimate_kwh']
         for v in all_versions
-        if v['power_analysis']['energy_estimate_mj'] is not None
+        if v['power_analysis']['energy_estimate_kwh'] is not None
     )
 
     # Build enhanced report
@@ -595,7 +596,7 @@ def correlate_comparison_mode(
         },
         'summary': {
             **benchmark_data['summary'],
-            'total_energy_all_versions_mj': total_energy_all,
+            'total_energy_all_versions_kwh': total_energy_all,
             'by_version': version_stats,
         },
         'prompt_groups': enhanced_groups
@@ -608,29 +609,29 @@ def correlate_comparison_mode(
     for version_name, stats in version_stats.items():
         if stats:
             print(f"\n{version_name.upper()}:")
-            print(f"  Total Energy: {stats['total_energy_mj']:.1f} mJ")
+            print(f"  Total Energy: {stats['total_energy_kwh']:.6e} kWh")
 
             # Show breakdown for llm_optimized
             if version_name == 'llm_optimized':
-                opt_overhead = stats.get('optimization_overhead_mj', 0)
-                exec_only = stats.get('execution_only_energy_mj', 0)
-                print(f"    - Optimization overhead: {opt_overhead:.1f} mJ")
-                print(f"    - Execution only: {exec_only:.1f} mJ")
+                opt_overhead = stats.get('optimization_overhead_kwh', 0)
+                exec_only = stats.get('execution_only_energy_kwh', 0)
+                print(f"    - Optimization overhead: {opt_overhead:.6e} kWh")
+                print(f"    - Execution only: {exec_only:.6e} kWh")
 
-            print(f"  Avg Power: {stats['avg_inference_power_mw']:.0f} mW" if stats['avg_inference_power_mw'] else "  Avg Power: N/A")
-            print(f"  Peak Power: {stats['peak_power_mw']} mW" if stats['peak_power_mw'] else "  Peak Power: N/A")
+            print(f"  Avg Power: {stats['avg_inference_power_w']:.3f} W" if stats['avg_inference_power_w'] else "  Avg Power: N/A")
+            print(f"  Peak Power: {stats['peak_power_w']:.3f} W" if stats['peak_power_w'] else "  Peak Power: N/A")
 
     # Calculate savings (positive = savings/less energy, negative = increase/more energy)
     if version_stats['original'] and version_stats['rule_optimized']:
-        orig_energy = version_stats['original']['total_energy_mj']
-        rule_energy = version_stats['rule_optimized']['total_energy_mj']
+        orig_energy = version_stats['original']['total_energy_kwh']
+        rule_energy = version_stats['rule_optimized']['total_energy_kwh']
         rule_savings = ((orig_energy - rule_energy) / orig_energy * 100) if orig_energy > 0 else 0
         print(f"\nRULE OPTIMIZATION: {rule_savings:+.1f}% saved")
 
     if version_stats['original'] and version_stats['llm_optimized']:
-        orig_energy = version_stats['original']['total_energy_mj']
-        llm_energy_total = version_stats['llm_optimized']['total_energy_mj']  # Already includes overhead
-        llm_exec_only = version_stats['llm_optimized'].get('execution_only_energy_mj', llm_energy_total)
+        orig_energy = version_stats['original']['total_energy_kwh']
+        llm_energy_total = version_stats['llm_optimized']['total_energy_kwh']  # Already includes overhead
+        llm_exec_only = version_stats['llm_optimized'].get('execution_only_energy_kwh', llm_energy_total)
 
         # Calculate savings including overhead (realistic)
         llm_savings_with_overhead = ((orig_energy - llm_energy_total) / orig_energy * 100) if orig_energy > 0 else 0
@@ -726,9 +727,9 @@ def create_prompt_timeline_chart(
 
     # Extract data for plotting
     timestamps = [s['timestamp'] for s in window_samples]
-    combined_power = [s['combined_power_mw'] for s in window_samples]
-    cpu_power = [s['cpu_power_mw'] for s in window_samples]
-    gpu_power = [s['gpu_power_mw'] for s in window_samples]
+    combined_power = [s['combined_power_w'] for s in window_samples]
+    cpu_power = [s['cpu_power_w'] for s in window_samples]
+    gpu_power = [s['gpu_power_w'] for s in window_samples]
 
     # Create figure
     fig, ax = plt.subplots(figsize=(12, 5))
@@ -752,7 +753,7 @@ def create_prompt_timeline_chart(
 
     # Formatting
     ax.set_xlabel('Time', fontsize=11)
-    ax.set_ylabel('Power (mW)', fontsize=11)
+    ax.set_ylabel('Power (W)', fontsize=11)
     ax.set_title(f'Prompt {prompt_index + 1}: {prompt_data["category"].upper()} - Power Timeline',
                  fontsize=12, fontweight='bold')
     ax.legend(loc='upper right', fontsize=9)
@@ -788,7 +789,7 @@ def create_overall_timeline_chart(enhanced_data: Dict, power_samples: List[Dict]
 
     # Extract all timestamps and power
     timestamps = [s['timestamp'] for s in power_samples]
-    combined_power = [s['combined_power_mw'] for s in power_samples]
+    combined_power = [s['combined_power_w'] for s in power_samples]
 
     # Create figure
     fig, ax = plt.subplots(figsize=(14, 6))
@@ -817,7 +818,7 @@ def create_overall_timeline_chart(enhanced_data: Dict, power_samples: List[Dict]
 
     # Formatting
     ax.set_xlabel('Time', fontsize=12)
-    ax.set_ylabel('Combined Power (mW)', fontsize=12)
+    ax.set_ylabel('Combined Power (W)', fontsize=12)
     ax.set_title('Power Consumption Timeline - All Prompts', fontsize=14, fontweight='bold')
     ax.legend(loc='upper right', fontsize=10)
     ax.grid(True, alpha=0.3, linestyle='--')
@@ -848,11 +849,11 @@ def create_comparison_charts(enhanced_data: Dict) -> plt.Figure:
         cat = prompt['category']
         pa = prompt['power_analysis']
 
-        if pa['inference'] and pa['energy_estimate_mj']:
+        if pa['inference'] and pa['energy_estimate_kwh']:
             category_data[cat].append({
-                'avg_power': pa['inference']['avg_mw'],
-                'peak_power': pa['peak_power_mw'],
-                'energy': pa['energy_estimate_mj'],
+                'avg_power': pa['inference']['avg_w'],
+                'peak_power': pa['peak_power_w'],
+                'energy': pa['energy_estimate_kwh'],
                 'duration': prompt['timing']['inference_duration_s']
             })
 
@@ -882,7 +883,7 @@ def create_comparison_charts(enhanced_data: Dict) -> plt.Figure:
 
     # Average Power
     bars1 = ax1.bar(x_pos, avg_power_by_cat, color=colors, alpha=0.7)
-    ax1.set_ylabel('Average Power (mW)', fontsize=11)
+    ax1.set_ylabel('Average Power (W)', fontsize=11)
     ax1.set_title('Average Inference Power by Category', fontsize=12, fontweight='bold')
     ax1.set_xticks(x_pos)
     ax1.set_xticklabels([c.capitalize() for c in categories])
@@ -890,11 +891,11 @@ def create_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     for bar, val in zip(bars1, avg_power_by_cat):
         height = bar.get_height()
         ax1.text(bar.get_x() + bar.get_width()/2., height,
-                f'{val:.0f}', ha='center', va='bottom', fontsize=10)
+                f'{val:.2f}', ha='center', va='bottom', fontsize=10)
 
     # Peak Power
     bars2 = ax2.bar(x_pos, peak_power_by_cat, color=colors, alpha=0.7)
-    ax2.set_ylabel('Peak Power (mW)', fontsize=11)
+    ax2.set_ylabel('Peak Power (W)', fontsize=11)
     ax2.set_title('Peak Inference Power by Category', fontsize=12, fontweight='bold')
     ax2.set_xticks(x_pos)
     ax2.set_xticklabels([c.capitalize() for c in categories])
@@ -902,11 +903,11 @@ def create_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     for bar, val in zip(bars2, peak_power_by_cat):
         height = bar.get_height()
         ax2.text(bar.get_x() + bar.get_width()/2., height,
-                f'{val:.0f}', ha='center', va='bottom', fontsize=10)
+                f'{val:.2f}', ha='center', va='bottom', fontsize=10)
 
     # Energy
     bars3 = ax3.bar(x_pos, energy_by_cat, color=colors, alpha=0.7)
-    ax3.set_ylabel('Average Energy (mJ)', fontsize=11)
+    ax3.set_ylabel('Average Energy (kWh)', fontsize=11)
     ax3.set_title('Average Energy Consumption by Category', fontsize=12, fontweight='bold')
     ax3.set_xticks(x_pos)
     ax3.set_xticklabels([c.capitalize() for c in categories])
@@ -914,7 +915,7 @@ def create_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     for bar, val in zip(bars3, energy_by_cat):
         height = bar.get_height()
         ax3.text(bar.get_x() + bar.get_width()/2., height,
-                f'{val:.1f}', ha='center', va='bottom', fontsize=10)
+                f'{val:.2e}', ha='center', va='bottom', fontsize=9)
 
     # Duration
     bars4 = ax4.bar(x_pos, duration_by_cat, color=colors, alpha=0.7)
@@ -948,11 +949,11 @@ def create_version_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     for group in enhanced_data['prompt_groups']:
         for version in group['versions']:
             pa = version['power_analysis']
-            if pa['inference'] and pa['energy_estimate_mj']:
+            if pa['inference'] and pa['energy_estimate_kwh']:
                 version_data[version['prompt_version']].append({
                     'category': group['category'],
-                    'avg_power': pa['inference']['avg_mw'],
-                    'energy': pa['energy_estimate_mj'],
+                    'avg_power': pa['inference']['avg_w'],
+                    'energy': pa['energy_estimate_kwh'],
                     'duration': version['timing']['inference_duration_s']
                 })
 
@@ -976,7 +977,7 @@ def create_version_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     # Chart 1: Average Power
     avg_powers = [version_stats.get(v, {}).get('avg_power', 0) for v in versions]
     bars1 = ax1.bar(range(len(versions)), avg_powers, color=colors, alpha=0.7)
-    ax1.set_ylabel('Average Power (mW)', fontsize=11)
+    ax1.set_ylabel('Average Power (W)', fontsize=11)
     ax1.set_title('Average Inference Power', fontsize=12, fontweight='bold')
     ax1.set_xticks(range(len(versions)))
     ax1.set_xticklabels(version_labels)
@@ -984,12 +985,12 @@ def create_version_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     for bar, val in zip(bars1, avg_powers):
         height = bar.get_height()
         ax1.text(bar.get_x() + bar.get_width()/2., height,
-                f'{val:.0f}', ha='center', va='bottom', fontsize=9)
+                f'{val:.2f}', ha='center', va='bottom', fontsize=9)
 
     # Chart 2: Total Energy
     total_energies = [version_stats.get(v, {}).get('total_energy', 0) for v in versions]
     bars2 = ax2.bar(range(len(versions)), total_energies, color=colors, alpha=0.7)
-    ax2.set_ylabel('Total Energy (mJ)', fontsize=11)
+    ax2.set_ylabel('Total Energy (kWh)', fontsize=11)
     ax2.set_title('Total Energy Consumption', fontsize=12, fontweight='bold')
     ax2.set_xticks(range(len(versions)))
     ax2.set_xticklabels(version_labels)
@@ -997,7 +998,7 @@ def create_version_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     for bar, val in zip(bars2, total_energies):
         height = bar.get_height()
         ax2.text(bar.get_x() + bar.get_width()/2., height,
-                f'{val:.1f}', ha='center', va='bottom', fontsize=9)
+                f'{val:.2e}', ha='center', va='bottom', fontsize=9)
 
     # Chart 3: Average Duration
     avg_durations = [version_stats.get(v, {}).get('avg_duration', 0) for v in versions]
@@ -1098,9 +1099,9 @@ def generate_standard_pdf_report(
             table.add_hline()
             table.add_row(['Total Prompts', enhanced_data['summary']['total_prompts']])
             table.add_row(['Total Duration', f"{enhanced_data['summary']['total_duration_s']:.2f} s"])
-            table.add_row(['Total Energy Consumption', f"{enhanced_data['summary']['total_energy_mj']:.1f} mJ"])
-            table.add_row(['Average Inference Power', f"{enhanced_data['summary']['avg_inference_power_mw']:.0f} mW"])
-            table.add_row(['Peak Power', f"{enhanced_data['summary']['peak_power_mw']} mW"])
+            table.add_row(['Total Energy Consumption', f"{enhanced_data['summary']['total_energy_kwh']:.6e} kWh"])
+            table.add_row(['Average Inference Power', f"{enhanced_data['summary']['avg_inference_power_w']:.3f} W"])
+            table.add_row(['Peak Power', f"{enhanced_data['summary']['peak_power_w']:.3f} W"])
             table.add_row(['Avg Tokens/Second', f"{enhanced_data['summary']['avg_tokens_per_second']:.1f}"])
             table.add_row(['Avg Time to First Token', f"{enhanced_data['summary']['avg_time_to_first_token_ms']:.1f} ms"])
             table.add_hline()
@@ -1197,28 +1198,28 @@ def generate_standard_pdf_report(
 
                 with doc.create(Tabular('|l|c|c|c|c|')) as table:
                     table.add_hline()
-                    table.add_row([bold('Phase'), bold('Min (mW)'), bold('Max (mW)'),
-                                   bold('Avg (mW)'), bold('Samples')])
+                    table.add_row([bold('Phase'), bold('Min (W)'), bold('Max (W)'),
+                                   bold('Avg (W)'), bold('Samples')])
                     table.add_hline()
 
                     if pa['baseline']:
                         bl = pa['baseline']
-                        table.add_row(['Baseline', bl['min_mw'], bl['max_mw'],
-                                      f"{bl['avg_mw']:.0f}", bl['samples']])
+                        table.add_row(['Baseline', f"{bl['min_w']:.3f}", f"{bl['max_w']:.3f}",
+                                      f"{bl['avg_w']:.3f}", bl['samples']])
                     else:
                         table.add_row(['Baseline', 'N/A', 'N/A', 'N/A', '0'])
 
                     if pa['inference']:
                         inf = pa['inference']
-                        table.add_row(['Inference', inf['min_mw'], inf['max_mw'],
-                                      f"{inf['avg_mw']:.0f}", inf['samples']])
+                        table.add_row(['Inference', f"{inf['min_w']:.3f}", f"{inf['max_w']:.3f}",
+                                      f"{inf['avg_w']:.3f}", inf['samples']])
                     else:
                         table.add_row(['Inference', 'N/A', 'N/A', 'N/A', '0'])
 
                     if pa['cooldown']:
                         cd = pa['cooldown']
-                        table.add_row(['Cooldown', cd['min_mw'], cd['max_mw'],
-                                      f"{cd['avg_mw']:.0f}", cd['samples']])
+                        table.add_row(['Cooldown', f"{cd['min_w']:.3f}", f"{cd['max_w']:.3f}",
+                                      f"{cd['avg_w']:.3f}", cd['samples']])
                     else:
                         table.add_row(['Cooldown', 'N/A', 'N/A', 'N/A', '0'])
 
@@ -1226,10 +1227,10 @@ def generate_standard_pdf_report(
 
                     # Add difference row if both baseline and inference exist
                     if pa['baseline'] and pa['inference']:
-                        diff_mw = inf['avg_mw'] - bl['avg_mw']
-                        pct_increase = (diff_mw / bl['avg_mw']) * 100 if bl['avg_mw'] > 0 else 0
+                        diff_w = inf['avg_w'] - bl['avg_w']
+                        pct_increase = (diff_w / bl['avg_w']) * 100 if bl['avg_w'] > 0 else 0
                         table.add_row([NoEscape(r'$\Delta$ Inference-Baseline'), '', '',
-                                      NoEscape(f"{diff_mw:+.0f} ({pct_increase:+.1f}\\%)"), ''])
+                                      NoEscape(f"{diff_w:+.3f} ({pct_increase:+.1f}\\%)"), ''])
                         table.add_hline()
 
                 # Energy Summary Table
@@ -1241,29 +1242,29 @@ def generate_standard_pdf_report(
                     table.add_row([bold('Metric'), bold('Value')])
                     table.add_hline()
 
-                    if pa['energy_estimate_mj']:
-                        table.add_row(['Total Energy', f"{pa['energy_estimate_mj']:.1f} mJ"])
+                    if pa['energy_estimate_kwh']:
+                        table.add_row(['Total Energy', f"{pa['energy_estimate_kwh']:.6e} kWh"])
 
-                    if pa['peak_power_mw']:
-                        table.add_row(['Peak Power', f"{pa['peak_power_mw']} mW"])
+                    if pa['peak_power_w']:
+                        table.add_row(['Peak Power', f"{pa['peak_power_w']:.3f} W"])
 
                     # Calculate and display incremental energy
-                    if pa['baseline'] and pa['inference'] and pa['energy_estimate_mj']:
-                        baseline_avg_mw = pa['baseline']['avg_mw']
+                    if pa['baseline'] and pa['inference'] and pa['energy_estimate_kwh']:
+                        baseline_avg_w = pa['baseline']['avg_w']
                         inference_duration_s = prompt['timing']['inference_duration_s']
 
                         # Energy if baseline continued for full inference duration
-                        # FIXED: No division needed - mW × s = mJ directly
-                        baseline_continuation_energy_mj = baseline_avg_mw * inference_duration_s
+                        # W × s / 3,600,000 = kWh
+                        baseline_continuation_energy_kwh = baseline_avg_w * inference_duration_s / 3_600_000
 
                         # Extra energy consumed by inference workload above baseline
-                        incremental_energy_mj = pa['energy_estimate_mj'] - baseline_continuation_energy_mj
+                        incremental_energy_kwh = pa['energy_estimate_kwh'] - baseline_continuation_energy_kwh
 
                         # Percentage of total energy that's incremental
-                        incremental_pct = (incremental_energy_mj / pa['energy_estimate_mj'] * 100) if pa['energy_estimate_mj'] > 0 else 0
+                        incremental_pct = (incremental_energy_kwh / pa['energy_estimate_kwh'] * 100) if pa['energy_estimate_kwh'] > 0 else 0
 
                         table.add_row(['Incremental Energy',
-                                      f"{incremental_energy_mj:.1f} mJ ({incremental_pct:.1f}%)"])
+                                      f"{incremental_energy_kwh:.6e} kWh ({incremental_pct:.1f}%)"])
 
                     table.add_hline()
 
@@ -1342,7 +1343,7 @@ def generate_comparison_pdf_report(
 
         with doc.create(Tabular('|l|r|r|r|')) as table:
             table.add_hline()
-            table.add_row([bold('Version'), bold('Total Energy (mJ)'), bold('Avg Power (mW)'), bold('Peak Power (mW)')])
+            table.add_row([bold('Version'), bold('Total Energy (kWh)'), bold('Avg Power (W)'), bold('Peak Power (W)')])
             table.add_hline()
 
             summary = enhanced_data['summary']
@@ -1351,9 +1352,9 @@ def generate_comparison_pdf_report(
                     stats = summary['by_version'][version_name]
                     table.add_row([
                         version_name.replace('_', ' ').title(),
-                        f"{stats['total_energy_mj']:.1f}" if stats['total_energy_mj'] else 'N/A',
-                        f"{stats['avg_inference_power_mw']:.0f}" if stats['avg_inference_power_mw'] else 'N/A',
-                        f"{stats['peak_power_mw']}" if stats['peak_power_mw'] else 'N/A'
+                        f"{stats['total_energy_kwh']:.6e}" if stats['total_energy_kwh'] else 'N/A',
+                        f"{stats['avg_inference_power_w']:.3f}" if stats['avg_inference_power_w'] else 'N/A',
+                        f"{stats['peak_power_w']:.3f}" if stats['peak_power_w'] else 'N/A'
                     ])
             table.add_hline()
 
@@ -1361,24 +1362,24 @@ def generate_comparison_pdf_report(
         doc.append('\n\n')
         if summary['by_version']['llm_optimized']:
             llm_stats = summary['by_version']['llm_optimized']
-            if llm_stats.get('optimization_overhead_mj'):
+            if llm_stats.get('optimization_overhead_kwh'):
                 doc.append(NoEscape(r'\textbf{LLM Self-Optimization Breakdown:}\\'))
-                doc.append(NoEscape(f"Optimization overhead: {llm_stats['optimization_overhead_mj']:.1f} mJ\\\\"))
-                doc.append(NoEscape(f"Execution energy: {llm_stats['execution_only_energy_mj']:.1f} mJ\\\\"))
-                doc.append(NoEscape(f"Total (optimization + execution): {llm_stats['total_energy_mj']:.1f} mJ\\\\"))
+                doc.append(NoEscape(f"Optimization overhead: {llm_stats['optimization_overhead_kwh']:.6e} kWh\\\\"))
+                doc.append(NoEscape(f"Execution energy: {llm_stats['execution_only_energy_kwh']:.6e} kWh\\\\"))
+                doc.append(NoEscape(f"Total (optimization + execution): {llm_stats['total_energy_kwh']:.6e} kWh\\\\"))
                 doc.append('\n\n')
 
         # Calculate and show savings
         if summary['by_version']['original'] and summary['by_version']['rule_optimized']:
-            orig_e = summary['by_version']['original']['total_energy_mj']
-            rule_e = summary['by_version']['rule_optimized']['total_energy_mj']
+            orig_e = summary['by_version']['original']['total_energy_kwh']
+            rule_e = summary['by_version']['rule_optimized']['total_energy_kwh']
             savings_pct = ((orig_e - rule_e) / orig_e * 100) if orig_e > 0 else 0
             doc.append(NoEscape(f"\\textbf{{Rule-based optimization:}} {savings_pct:+.1f}\\% saved\\\\"))
 
         if summary['by_version']['original'] and summary['by_version']['llm_optimized']:
-            orig_e = summary['by_version']['original']['total_energy_mj']
-            llm_e_total = summary['by_version']['llm_optimized']['total_energy_mj']  # Includes overhead
-            llm_e_exec = summary['by_version']['llm_optimized'].get('execution_only_energy_mj', llm_e_total)
+            orig_e = summary['by_version']['original']['total_energy_kwh']
+            llm_e_total = summary['by_version']['llm_optimized']['total_energy_kwh']  # Includes overhead
+            llm_e_exec = summary['by_version']['llm_optimized'].get('execution_only_energy_kwh', llm_e_total)
 
             savings_with_overhead = ((orig_e - llm_e_total) / orig_e * 100) if orig_e > 0 else 0
             savings_exec_only = ((orig_e - llm_e_exec) / orig_e * 100) if orig_e > 0 else 0
@@ -1417,8 +1418,8 @@ def generate_comparison_pdf_report(
 
                 with doc.create(Tabular('|l|r|r|r|r|')) as table:
                     table.add_hline()
-                    table.add_row([bold('Version'), bold('Total Energy (mJ)'), bold('Opt. OH (mJ)'),
-                                  bold('Avg Power (mW)'), bold('Duration (s)')])
+                    table.add_row([bold('Version'), bold('Total Energy (kWh)'), bold('Opt. OH (kWh)'),
+                                  bold('Avg Power (W)'), bold('Duration (s)')])
                     table.add_hline()
 
                     for version in group['versions']:
@@ -1427,14 +1428,14 @@ def generate_comparison_pdf_report(
 
                         # Get optimization overhead if it exists
                         opt_overhead = ''
-                        if version['prompt_version'] == 'llm_optimized' and pa.get('optimization_overhead_mj'):
-                            opt_overhead = f"{pa['optimization_overhead_mj']:.1f}"
+                        if version['prompt_version'] == 'llm_optimized' and pa.get('optimization_overhead_kwh'):
+                            opt_overhead = f"{pa['optimization_overhead_kwh']:.6e}"
 
                         table.add_row([
                             version['prompt_version'].replace('_', ' ').title(),
-                            f"{pa['energy_estimate_mj']:.1f}" if pa.get('energy_estimate_mj') else 'N/A',
+                            f"{pa['energy_estimate_kwh']:.6e}" if pa.get('energy_estimate_kwh') else 'N/A',
                             opt_overhead,
-                            f"{pa['inference']['avg_mw']:.0f}" if pa.get('inference') else 'N/A',
+                            f"{pa['inference']['avg_w']:.3f}" if pa.get('inference') else 'N/A',
                             f"{timing['inference_duration_s']:.2f}"
                         ])
                     table.add_hline()
@@ -1557,18 +1558,18 @@ Note:
             print(f"  Mode: Comparison")
             print(f"  Total base prompts: {enhanced_data['summary']['total_base_prompts']}")
             print(f"  Total executions: {enhanced_data['summary']['total_executions']}")
-            print(f"  Total energy (all versions): {enhanced_data['summary']['total_energy_all_versions_mj']:.1f} mJ")
+            print(f"  Total energy (all versions): {enhanced_data['summary']['total_energy_all_versions_kwh']:.6e} kWh")
 
             # Show per-version breakdown
             for version_name, stats in enhanced_data['summary']['by_version'].items():
                 if stats:
-                    print(f"  {version_name.replace('_', ' ').title()}: {stats['total_energy_mj']:.1f} mJ")
+                    print(f"  {version_name.replace('_', ' ').title()}: {stats['total_energy_kwh']:.6e} kWh")
         else:
             print(f"  Mode: Standard")
             print(f"  Total prompts: {enhanced_data['summary']['total_prompts']}")
-            print(f"  Total energy: {enhanced_data['summary']['total_energy_mj']:.1f} mJ")
-            print(f"  Avg inference power: {enhanced_data['summary']['avg_inference_power_mw']:.0f} mW")
-            print(f"  Peak power: {enhanced_data['summary']['peak_power_mw']} mW")
+            print(f"  Total energy: {enhanced_data['summary']['total_energy_kwh']:.6e} kWh")
+            print(f"  Avg inference power: {enhanced_data['summary']['avg_inference_power_w']:.3f} W")
+            print(f"  Peak power: {enhanced_data['summary']['peak_power_w']:.3f} W")
 
     except Exception as e:
         import traceback
