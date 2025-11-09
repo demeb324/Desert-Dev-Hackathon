@@ -18,6 +18,19 @@ const lexicon = [
   /\bi'm sorry\b/gi,
   /\bsorry\b/gi,
   /\bno problem\b/gi,
+  /\bthe following\b/gi,
+  /\bvery\b/gi,
+  /\bextremely\b/gi,
+  /\bcompletely\b/gi,
+  /\babsolutely\b/gi,
+  /\bincredibly\b/gi,
+  /\bgenerally\b/gi,
+  /\bessentially\b/gi,
+  /\breally\b/gi,
+  /\btell me\b/gi,
+  /\bcan you\b/gi,
+  /\bcould you\b/gi,
+  /\bwould you\b/gi,
 ];
 
 /**
