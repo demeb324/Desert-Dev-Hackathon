@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import {FaBrain, FaChartLine, FaCog, FaInfoCircle, FaLeaf} from "react-icons/fa";
+import {FaBrain, FaChartLine, FaCog, FaInfoCircle, FaLeaf, FaFlask} from "react-icons/fa";
 import TypewriterText from "./typewriter.tsx";
 
 const Navbar: React.FC = () => {
@@ -25,6 +25,9 @@ const Navbar: React.FC = () => {
                 </Link>
                 <Link to="/statistics" className={linkClass("/statistics")}>
                     <FaChartLine /> Statistics
+                </Link>
+                <Link to="/research" className={linkClass("/research")}>
+                    <FaFlask /> Research
                 </Link>
             </div>
         </nav>

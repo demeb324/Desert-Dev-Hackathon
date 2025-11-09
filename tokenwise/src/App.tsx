@@ -3,6 +3,7 @@ import Navbar from "./components/Navbar";
 import Dashboard from "./pages/Dashboard.tsx";
 import About from "./pages/About";
 import OptiGreenYearlyStats from "./pages/OptiGreenYearlyStats";
+import Research from "./pages/Research";
 import FooterCustom from "./components/FooterCustom.tsx";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
@@ -17,6 +18,7 @@ const App: React.FC = () => {
                             <Route path="/" element={<Dashboard />} />
                             <Route path="/about" element={<About />} />
                             <Route path="/statistics" element={<OptiGreenYearlyStats />} />
+                            <Route path="/research" element={<Research />} />
                         </Routes>
                     </main>
                     <FooterCustom/>
