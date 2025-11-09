@@ -284,6 +284,18 @@ def correlate_power_timing(
     # Get reference timezone from power samples
     reference_tz = power_samples[0]['timestamp']
 
+    # Detect comparison mode
+    comparison_mode = benchmark_data.get('comparison_mode', False)
+
+    if comparison_mode:
+        print("\n[COMPARISON MODE DETECTED]")
+        print("Processing prompt groups with multiple versions...")
+        return correlate_comparison_mode(
+            benchmark_data, power_samples, baseline_window_s, cooldown_window_s, reference_tz, power_file
+        )
+
+    # Standard mode processing
+    print("\n[STANDARD MODE]")
     # Analyze each prompt
     print("\nAnalyzing power consumption for each prompt...")
     enhanced_prompts = []
@@ -335,6 +347,7 @@ def correlate_power_timing(
     enhanced_data = {
         'benchmark_id': benchmark_data['benchmark_id'],
         'model': benchmark_data['model'],
+        'comparison_mode': False,
         'correlation_params': {
             'power_csv_file': power_file,
             'baseline_window_s': baseline_window_s,
@@ -348,6 +361,166 @@ def correlate_power_timing(
         },
         'prompts': enhanced_prompts
     }
+
+    return enhanced_data
+
+
+def correlate_comparison_mode(
+    benchmark_data: Dict,
+    power_samples: List[Dict],
+    baseline_window_s: float,
+    cooldown_window_s: float,
+    reference_tz,
+    power_file: str
+) -> Dict:
+    """
+    Correlate power data for comparison mode benchmarks.
+
+    Args:
+        benchmark_data: Benchmark data with prompt_groups
+        power_samples: Power samples
+        baseline_window_s: Baseline window duration
+        cooldown_window_s: Cooldown window duration
+        reference_tz: Reference timezone
+        power_file: Path to power CSV file
+
+    Returns:
+        Enhanced benchmark data with power analysis for all versions
+    """
+    enhanced_groups = []
+
+    for group_id, group in enumerate(benchmark_data['prompt_groups']):
+        print(f"\n  Group {group_id + 1}/{len(benchmark_data['prompt_groups'])}: {group['category']}")
+        print(f"  Base prompt: {group['base_prompt'][:60]}...")
+
+        enhanced_versions = []
+
+        for version in group['versions']:
+            print(f"    - {version['prompt_version']}: {version['prompt'][:50]}...")
+
+            power_analysis = analyze_prompt_power(
+                version,
+                power_samples,
+                baseline_window_s,
+                cooldown_window_s,
+                reference_tz
+            )
+
+            enhanced_version = version.copy()
+            enhanced_version['power_analysis'] = asdict(power_analysis)
+            enhanced_versions.append(enhanced_version)
+
+            # Print summary
+            if power_analysis.inference:
+                print(f"        Power: {power_analysis.inference.avg_mw:.0f} mW avg, "
+                      f"Energy: {power_analysis.energy_estimate_mj:.1f} mJ")
+
+        enhanced_group = group.copy()
+        enhanced_group['versions'] = enhanced_versions
+        enhanced_groups.append(enhanced_group)
+
+    # Calculate summary statistics by version
+    all_versions = []
+    for group in enhanced_groups:
+        all_versions.extend(group['versions'])
+
+    def calc_version_stats(version_name: str):
+        version_prompts = [v for v in all_versions if v['prompt_version'] == version_name]
+        if not version_prompts:
+            return None
+
+        total_energy = sum(
+            v['power_analysis']['energy_estimate_mj']
+            for v in version_prompts
+            if v['power_analysis']['energy_estimate_mj'] is not None
+        )
+
+        valid_power = [v for v in version_prompts if v['power_analysis']['inference'] is not None]
+        avg_power = sum(
+            v['power_analysis']['inference']['avg_mw']
+            for v in valid_power
+        ) / len(valid_power) if valid_power else None
+
+        valid_peak = [v for v in version_prompts if v['power_analysis']['peak_power_mw'] is not None]
+        peak_power = max(
+            v['power_analysis']['peak_power_mw']
+            for v in valid_peak
+        ) if valid_peak else None
+
+        return {
+            'total_energy_mj': total_energy,
+            'avg_inference_power_mw': avg_power,
+            'peak_power_mw': peak_power,
+        }
+
+    version_stats = {
+        'original': calc_version_stats('original'),
+        'rule_optimized': calc_version_stats('rule_optimized'),
+        'llm_optimized': calc_version_stats('llm_optimized'),
+    }
+
+    # Calculate overall totals
+    total_energy_all = sum(
+        v['power_analysis']['energy_estimate_mj']
+        for v in all_versions
+        if v['power_analysis']['energy_estimate_mj'] is not None
+    )
+
+    # Build enhanced report
+    enhanced_data = {
+        'benchmark_id': benchmark_data['benchmark_id'],
+        'model': benchmark_data['model'],
+        'comparison_mode': True,
+        'correlation_params': {
+            'power_csv_file': power_file,
+            'baseline_window_s': baseline_window_s,
+            'cooldown_window_s': cooldown_window_s,
+        },
+        'summary': {
+            **benchmark_data['summary'],
+            'total_energy_all_versions_mj': total_energy_all,
+            'by_version': version_stats,
+        },
+        'prompt_groups': enhanced_groups
+    }
+
+    # Print comparison summary
+    print(f"\n{'='*70}")
+    print(f"COMPARISON SUMMARY:")
+    print(f"{'='*70}")
+    for version_name, stats in version_stats.items():
+        if stats:
+            print(f"\n{version_name.upper()}:")
+            print(f"  Total Energy: {stats['total_energy_mj']:.1f} mJ")
+            print(f"  Avg Power: {stats['avg_inference_power_mw']:.0f} mW" if stats['avg_inference_power_mw'] else "  Avg Power: N/A")
+            print(f"  Peak Power: {stats['peak_power_mw']} mW" if stats['peak_power_mw'] else "  Peak Power: N/A")
+
+    # Calculate savings
+    if version_stats['original'] and version_stats['rule_optimized']:
+        orig_energy = version_stats['original']['total_energy_mj']
+        rule_energy = version_stats['rule_optimized']['total_energy_mj']
+        rule_savings = ((orig_energy - rule_energy) / orig_energy * 100) if orig_energy > 0 else 0
+        print(f"\nRULE OPTIMIZATION SAVINGS: {rule_savings:+.1f}%")
+
+    if version_stats['original'] and version_stats['llm_optimized']:
+        orig_energy = version_stats['original']['total_energy_mj']
+        llm_energy = version_stats['llm_optimized']['total_energy_mj']
+        # Add LLM optimization overhead
+        if 'optimization_overhead' in benchmark_data['summary']:
+            llm_overhead = benchmark_data['summary']['optimization_overhead'].get('total_llm_optimization_time_s', 0)
+            # Estimate overhead energy (assuming similar power consumption)
+            if version_stats['original']['avg_inference_power_mw']:
+                llm_overhead_energy = version_stats['original']['avg_inference_power_mw'] * llm_overhead
+                llm_energy_total = llm_energy + llm_overhead_energy
+                print(f"  (LLM optimization overhead: {llm_overhead_energy:.1f} mJ)")
+            else:
+                llm_energy_total = llm_energy
+        else:
+            llm_energy_total = llm_energy
+        llm_savings = ((orig_energy - llm_energy_total) / orig_energy * 100) if orig_energy > 0 else 0
+        print(f"LLM OPTIMIZATION SAVINGS (incl. overhead): {llm_savings:+.1f}%")
+
+    print(f"{'='*70}\n")
 
     return enhanced_data
 
@@ -637,6 +810,90 @@ def create_comparison_charts(enhanced_data: Dict) -> plt.Figure:
     return fig
 
 
+def create_version_comparison_charts(enhanced_data: Dict) -> plt.Figure:
+    """
+    Create comparison charts for different prompt versions (comparison mode).
+
+    Args:
+        enhanced_data: Enhanced benchmark data in comparison mode
+
+    Returns:
+        matplotlib Figure with comparison charts
+    """
+    # Collect data by version
+    version_data = {'original': [], 'rule_optimized': [], 'llm_optimized': []}
+
+    for group in enhanced_data['prompt_groups']:
+        for version in group['versions']:
+            pa = version['power_analysis']
+            if pa['inference'] and pa['energy_estimate_mj']:
+                version_data[version['prompt_version']].append({
+                    'category': group['category'],
+                    'avg_power': pa['inference']['avg_mw'],
+                    'energy': pa['energy_estimate_mj'],
+                    'duration': version['timing']['inference_duration_s']
+                })
+
+    # Calculate stats per version
+    version_stats = {}
+    for version_name, data_list in version_data.items():
+        if data_list:
+            version_stats[version_name] = {
+                'avg_power': sum(d['avg_power'] for d in data_list) / len(data_list),
+                'total_energy': sum(d['energy'] for d in data_list),
+                'avg_duration': sum(d['duration'] for d in data_list) / len(data_list)
+            }
+
+    # Create figure with 1x3 subplots
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+
+    versions = ['original', 'rule_optimized', 'llm_optimized']
+    version_labels = ['Original', 'Rule\nOptimized', 'LLM\nOptimized']
+    colors = ['#3498db', '#2ecc71', '#e74c3c']
+
+    # Chart 1: Average Power
+    avg_powers = [version_stats.get(v, {}).get('avg_power', 0) for v in versions]
+    bars1 = ax1.bar(range(len(versions)), avg_powers, color=colors, alpha=0.7)
+    ax1.set_ylabel('Average Power (mW)', fontsize=11)
+    ax1.set_title('Average Inference Power', fontsize=12, fontweight='bold')
+    ax1.set_xticks(range(len(versions)))
+    ax1.set_xticklabels(version_labels)
+    ax1.grid(axis='y', alpha=0.3)
+    for bar, val in zip(bars1, avg_powers):
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.0f}', ha='center', va='bottom', fontsize=9)
+
+    # Chart 2: Total Energy
+    total_energies = [version_stats.get(v, {}).get('total_energy', 0) for v in versions]
+    bars2 = ax2.bar(range(len(versions)), total_energies, color=colors, alpha=0.7)
+    ax2.set_ylabel('Total Energy (mJ)', fontsize=11)
+    ax2.set_title('Total Energy Consumption', fontsize=12, fontweight='bold')
+    ax2.set_xticks(range(len(versions)))
+    ax2.set_xticklabels(version_labels)
+    ax2.grid(axis='y', alpha=0.3)
+    for bar, val in zip(bars2, total_energies):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.1f}', ha='center', va='bottom', fontsize=9)
+
+    # Chart 3: Average Duration
+    avg_durations = [version_stats.get(v, {}).get('avg_duration', 0) for v in versions]
+    bars3 = ax3.bar(range(len(versions)), avg_durations, color=colors, alpha=0.7)
+    ax3.set_ylabel('Average Duration (s)', fontsize=11)
+    ax3.set_title('Average Inference Duration', fontsize=12, fontweight='bold')
+    ax3.set_xticks(range(len(versions)))
+    ax3.set_xticklabels(version_labels)
+    ax3.grid(axis='y', alpha=0.3)
+    for bar, val in zip(bars3, avg_durations):
+        height = bar.get_height()
+        ax3.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.2f}', ha='center', va='bottom', fontsize=9)
+
+    plt.tight_layout()
+    return fig
+
+
 def generate_pdf_report(
     enhanced_data: Dict,
     power_samples: List[Dict],
@@ -660,6 +917,29 @@ def generate_pdf_report(
         print("On macOS, install MacTeX: brew install --cask mactex", file=sys.stderr)
         print("Or BasicTeX: brew install --cask basictex", file=sys.stderr)
         sys.exit(1)
+
+    # Detect comparison mode
+    comparison_mode = enhanced_data.get('comparison_mode', False)
+
+    if comparison_mode:
+        generate_comparison_pdf_report(enhanced_data, power_samples, output_file)
+    else:
+        generate_standard_pdf_report(enhanced_data, power_samples, output_file)
+
+
+def generate_standard_pdf_report(
+    enhanced_data: Dict,
+    power_samples: List[Dict],
+    output_file: str
+):
+    """
+    Generate standard (non-comparison) PDF report.
+
+    Args:
+        enhanced_data: Enhanced benchmark data with power analysis
+        power_samples: All power samples
+        output_file: Output PDF path (without extension)
+    """
 
     # Create document
     geometry_options = {
@@ -876,6 +1156,150 @@ def generate_pdf_report(
                     plt.close(fig)
                 except Exception as e:
                     doc.append(f'Error generating timeline for this prompt: {str(e)}\n')
+
+    # Generate PDF
+    print(f"Compiling LaTeX to PDF...")
+    try:
+        doc.generate_pdf(output_file, clean_tex=False, compiler='lualatex')
+        print(f"\n{'='*70}")
+        print(f"PDF report generated successfully!")
+        print(f"{'='*70}")
+        print(f"Output: {output_file}.pdf")
+        print(f"LaTeX source: {output_file}.tex")
+        print(f"{'='*70}")
+    except subprocess.CalledProcessError as e:
+        print(f"\nERROR: LaTeX compilation failed!", file=sys.stderr)
+        print(f"Check {output_file}.log for details", file=sys.stderr)
+        raise
+    except Exception as e:
+        print(f"\nERROR: PDF generation failed: {e}", file=sys.stderr)
+        raise
+
+
+def generate_comparison_pdf_report(
+    enhanced_data: Dict,
+    power_samples: List[Dict],
+    output_file: str
+):
+    """
+    Generate comparison-mode PDF report showing all prompt versions.
+
+    Args:
+        enhanced_data: Enhanced benchmark data with prompt_groups
+        power_samples: All power samples
+        output_file: Output PDF path (without extension)
+    """
+    # Create document
+    geometry_options = {
+        "tmargin": "2cm",
+        "bmargin": "2cm",
+        "lmargin": "2cm",
+        "rmargin": "2cm"
+    }
+    doc = Document(geometry_options=geometry_options, page_numbers=True)
+
+    # Add required packages
+    doc.packages.append(Package('booktabs'))
+    doc.packages.append(Package('float'))
+    doc.packages.append(Package('longtable'))
+    doc.packages.append(Package('array'))
+    doc.packages.append(Package('listings'))
+
+    # Configure listings
+    doc.preamble.append(NoEscape(r'\lstset{basicstyle=\small\ttfamily, breaklines=true, breakatwhitespace=false, columns=flexible}'))
+
+    # Title page
+    doc.preamble.append(Command('title', 'LM Studio Power Consumption Analysis\\\\\\large{Comparison Mode}'))
+    doc.preamble.append(Command('author', f'Model: {enhanced_data["model"]}'))
+    doc.preamble.append(Command('date', f'Benchmark: {enhanced_data["benchmark_id"]}'))
+    doc.append(NoEscape(r'\maketitle'))
+
+    # Executive Summary
+    with doc.create(Section('Executive Summary')):
+        doc.append('Comparison of three prompt optimization strategies:\n\n')
+
+        with doc.create(Tabular('|l|r|r|r|')) as table:
+            table.add_hline()
+            table.add_row([bold('Version'), bold('Total Energy (mJ)'), bold('Avg Power (mW)'), bold('Peak Power (mW)')])
+            table.add_hline()
+
+            summary = enhanced_data['summary']
+            for version_name in ['original', 'rule_optimized', 'llm_optimized']:
+                if version_name in summary['by_version'] and summary['by_version'][version_name]:
+                    stats = summary['by_version'][version_name]
+                    table.add_row([
+                        version_name.replace('_', ' ').title(),
+                        f"{stats['total_energy_mj']:.1f}" if stats['total_energy_mj'] else 'N/A',
+                        f"{stats['avg_inference_power_mw']:.0f}" if stats['avg_inference_power_mw'] else 'N/A',
+                        f"{stats['peak_power_mw']}" if stats['peak_power_mw'] else 'N/A'
+                    ])
+            table.add_hline()
+
+        # Calculate and show savings
+        doc.append('\n\n')
+        if summary['by_version']['original'] and summary['by_version']['rule_optimized']:
+            orig_e = summary['by_version']['original']['total_energy_mj']
+            rule_e = summary['by_version']['rule_optimized']['total_energy_mj']
+            savings_pct = ((orig_e - rule_e) / orig_e * 100) if orig_e > 0 else 0
+            doc.append(NoEscape(f"\\textbf{{Rule-based optimization:}} {savings_pct:+.1f}\\% energy change\\\\"))
+
+        if summary['by_version']['original'] and summary['by_version']['llm_optimized']:
+            orig_e = summary['by_version']['original']['total_energy_mj']
+            llm_e = summary['by_version']['llm_optimized']['total_energy_mj']
+            savings_pct = ((orig_e - llm_e) / orig_e * 100) if orig_e > 0 else 0
+            doc.append(NoEscape(f"\\textbf{{LLM self-optimization:}} {savings_pct:+.1f}\\% energy change (excluding optimization overhead)\\\\"))
+
+    # Version Comparison Charts
+    with doc.create(Section('Version Comparison')):
+        doc.append('Comparison of power and energy metrics across optimization strategies.\n\n')
+
+        try:
+            fig = create_version_comparison_charts(enhanced_data)
+            with doc.create(Figure(position='H')) as plot:
+                plot.add_plot(width=NoEscape(r'\textwidth'), dpi=300)
+                plot.add_caption('Comparison of optimization strategies')
+            plt.close(fig)
+        except Exception as e:
+            doc.append(f'Error generating comparison charts: {str(e)}\n\n')
+
+    # Per-Group Analysis
+    with doc.create(Section('Detailed Per-Group Analysis')):
+        doc.append('Detailed breakdown of each prompt group showing all three versions.\n\n')
+
+        for group_id, group in enumerate(enhanced_data['prompt_groups']):
+            with doc.create(Subsection(f'Group {group_id + 1}: {group["category"].upper()}')):
+                doc.append(NoEscape(r'\textbf{Base Prompt:}\\'))
+                base_prompt = group['base_prompt']
+                lstlisting_block = f"\\begin{{lstlisting}}\n{base_prompt}\n\\end{{lstlisting}}\n"
+                doc.append(NoEscape(lstlisting_block))
+
+                # Comparison table for this group
+                doc.append(NoEscape(r'\textbf{Version Comparison:}'))
+                doc.append('\n\n')
+
+                with doc.create(Tabular('|l|r|r|r|')) as table:
+                    table.add_hline()
+                    table.add_row([bold('Version'), bold('Energy (mJ)'), bold('Avg Power (mW)'), bold('Duration (s)')])
+                    table.add_hline()
+
+                    for version in group['versions']:
+                        pa = version['power_analysis']
+                        timing = version['timing']
+                        table.add_row([
+                            version['prompt_version'].replace('_', ' ').title(),
+                            f"{pa['energy_estimate_mj']:.1f}" if pa['energy_estimate_mj'] else 'N/A',
+                            f"{pa['inference']['avg_mw']:.0f}" if pa['inference'] else 'N/A',
+                            f"{timing['inference_duration_s']:.2f}"
+                        ])
+                    table.add_hline()
+
+                # Show optimized prompts
+                doc.append('\n\n')
+                for version in group['versions']:
+                    if version['prompt_version'] != 'original':
+                        doc.append(NoEscape(f"\\textbf{{{version['prompt_version'].replace('_', ' ').title()} Prompt:}}\\\\"))
+                        lstlisting_block = f"\\begin{{lstlisting}}\n{version['prompt']}\n\\end{{lstlisting}}\n"
+                        doc.append(NoEscape(lstlisting_block))
 
     # Generate PDF
     print(f"Compiling LaTeX to PDF...")
