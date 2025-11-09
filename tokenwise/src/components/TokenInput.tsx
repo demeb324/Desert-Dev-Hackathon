@@ -1,32 +1,74 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { FaMicrochip } from "react-icons/fa";
 import type { TokenInputProps } from "../types/type";
-import { useTokenContext} from "../context/TokenContext";
-import { estimateTokens } from "../utils/tokenUtils";
+import { useTokenContext } from "../context/TokenContext";
+import { lmStudioService } from "@/services/lmStudioService";
+import { LoadingSpinner } from "./LoadingSpinner";
+
+// Debounce delay in milliseconds
+const DEBOUNCE_DELAY = 500;
 
 const TokenInput: React.FC<TokenInputProps> = ({ onInputReady }) => {
-    const [tokens, setTokens] = useState<number>(0);
     const [inputValue, setInputValue] = useState("");
-    const [cost, setCost] = useState<number>(0);
+    const [debouncedValue, setDebouncedValue] = useState("");
 
-    const {  updateTokenData} = useTokenContext();
+    const { tokens, setTokens, cost, setCost, setLoading, setError } = useTokenContext();
+    const [isCountingTokens, setIsCountingTokens] = useState(false);
 
-    const handleInput = () => {
-        // Estimate tokens via utility
-        const tokenEstimate = estimateTokens(inputValue);
-        setTokens(tokenEstimate);
+    // Debounce input value
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedValue(inputValue);
+        }, DEBOUNCE_DELAY);
 
-        // Example cost estimation (customize per your pricing)
-        const costPerToken = 0.000002; // Example: $0.002 / 1K tokens → $0.000002/token
-        const totalCost = parseFloat((tokenEstimate * costPerToken).toFixed(6));
-        setCost(totalCost);
+        return () => clearTimeout(timer);
+    }, [inputValue]);
 
+    // Calculate tokens and cost when debounced value changes
+    useEffect(() => {
+        if (!debouncedValue || debouncedValue.trim() === "") {
+            setTokens(0);
+            setCost(0);
+            return;
+        }
+
+        const updateTokenCount = async () => {
+            setIsCountingTokens(true);
+            setError(null);
+
+            try {
+                const tokenCount = await lmStudioService.getTokenCount(debouncedValue);
+                setTokens(tokenCount);
+
+                // Calculate cost (example pricing: $0.000002/token)
+                const costPerToken = 0.000002;
+                const totalCost = parseFloat((tokenCount * costPerToken).toFixed(6));
+                setCost(totalCost);
+            } catch (err: any) {
+                console.error("Failed to count tokens:", err);
+                // Don't show error to user for token counting - use fallback
+                const words = debouncedValue.match(/\b\w+\b/g);
+                const fallbackTokens = words ? Math.ceil(words.length * 1.3) : 0;
+                setTokens(fallbackTokens);
+
+                const costPerToken = 0.000002;
+                const totalCost = parseFloat((fallbackTokens * costPerToken).toFixed(6));
+                setCost(totalCost);
+            } finally {
+                setIsCountingTokens(false);
+            }
+        };
+
+        updateTokenCount();
+    }, [debouncedValue, setTokens, setCost, setError]);
+
+    const handleAnalyze = useCallback(() => {
         // Send prompt up to parent
         onInputReady(inputValue);
+    }, [inputValue, onInputReady]);
 
-        // Update global context
-        updateTokenData({ tokens: tokenEstimate, cost: totalCost, text: inputValue });
-    };
+    const maxTokens = 2048; // Visual max for progress bar
+    const progressPercentage = Math.min((tokens / maxTokens) * 100, 100);
 
     return (
         <div className="bg-gray-800 p-5 rounded-2xl shadow-xl">
@@ -37,20 +79,25 @@ const TokenInput: React.FC<TokenInputProps> = ({ onInputReady }) => {
             <textarea
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                className="w-full p-3 bg-gray-900 rounded-lg text-gray-200 focus:ring-2 focus:ring-cyan-500 outline-none"
+                className="w-full p-3 bg-gray-900 rounded-lg text-gray-200 focus:ring-2 focus:ring-cyan-500 outline-none resize-none"
                 placeholder="Type or paste your prompt here..."
                 rows={8}
             />
 
             {/* Analyze button + stats */}
             <div className="flex justify-between mt-3 text-sm text-gray-400 items-center">
-        <span>
-          Tokens:{" "}
-            <span className="text-cyan-400 font-bold transition-all">{tokens}</span>
-        </span>
+                <span className="flex items-center gap-2">
+                    Tokens:{" "}
+                    {isCountingTokens ? (
+                        <LoadingSpinner size="sm" />
+                    ) : (
+                        <span className="text-cyan-400 font-bold transition-all">{tokens}</span>
+                    )}
+                </span>
                 <button
-                    className="bg-cyan-500 hover:bg-cyan-600 px-4 py-1 rounded-lg text-black font-semibold"
-                    onClick={handleInput}
+                    className="bg-cyan-500 hover:bg-cyan-600 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-1 rounded-lg text-black font-semibold transition-colors"
+                    onClick={handleAnalyze}
+                    disabled={!inputValue || inputValue.trim() === ""}
                 >
                     Analyze
                 </button>
@@ -60,28 +107,34 @@ const TokenInput: React.FC<TokenInputProps> = ({ onInputReady }) => {
             <div className="mt-4 bg-gray-900 p-3 rounded-lg text-gray-300">
                 <div className="flex justify-between mb-2">
                     <span>Estimated Cost:</span>
-                    <span className="text-cyan-400">${cost}</span>
+                    <span className="text-cyan-400">${cost.toFixed(6)}</span>
                 </div>
 
                 {/* Visual progress bar */}
                 <div className="h-2 w-full bg-gray-700 rounded-full overflow-hidden">
                     <div
-                        className="h-full bg-cyan-500 transition-all duration-500"
+                        className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-500"
                         style={{
-                            width: `${Math.min(tokens / 20, 100)}%`, // scale for visual
+                            width: `${progressPercentage}%`,
                         }}
                     ></div>
                 </div>
+                <div className="text-xs text-gray-500 mt-1 text-right">
+                    {tokens} / {maxTokens} tokens
+                </div>
             </div>
 
-            {/* Model selection */}
-            <div className="mt-3">
-                <label className="text-gray-400">Model:</label>
-                <select className="ml-2 bg-gray-700 rounded px-2 py-1 text-gray-200">
-                    <option>GPT-4</option>
-                    <option>GPT-3.5</option>
-                    <option>Claude 3</option>
-                </select>
+            {/* LM Studio Badge */}
+            <div className="mt-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                    <span className="text-xs text-gray-400">LM Studio</span>
+                </div>
+                {isCountingTokens && (
+                    <span className="text-xs text-gray-500 animate-pulse">
+                        Counting tokens...
+                    </span>
+                )}
             </div>
         </div>
     );

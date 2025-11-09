@@ -8,6 +8,14 @@ export default defineConfig({
     server: {
         port: 5173, // you can change if needed
         open: true, // automatically opens the browser
+        proxy: {
+            // Proxy API requests to LM Studio to avoid CORS issues
+            '/api/lm-studio': {
+                target: 'http://localhost:1234',
+                changeOrigin: true,
+                rewrite: (path) => path.replace(/^\/api\/lm-studio/, ''),
+            },
+        },
     },
     build: {
         outDir: 'dist',
