@@ -2,14 +2,15 @@ import {FaMagic, FaCopy, FaCheck} from "react-icons/fa";
 import type {TokenOptimizerProps} from "../types/type.tsx";
 import {optimize_prompt} from "../../../scripts/optimizer.ts";
 import {useState} from "react";
+import {estimateTokens} from "../utils/tokenUtils.tsx";
 
 const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
     // Logic to process/optimize the tokenInput goes here
    // const optimizedResult = tokenInput ? tokenInput.toUpperCase() : ' Optimized prompt preview shown here...'; // Example optimization
     const optimizedResult=  tokenInput ? optimize_prompt(tokenInput) : ' Optimized prompt preview shown here...';
-    const tokenize = (text: string) => text.trim().split(/\s+/).filter(t => t.length > 0);
-    const beforeTokens = tokenize(tokenInput)
-    const afterTokens = tokenize(optimizedResult)
+
+    const beforeTokens = estimateTokens(tokenInput)
+    const afterTokens = estimateTokens(optimizedResult)
    // State to manage the visual feedback (e.g., change icon/text after successful copy)
     const [isCopied, setIsCopied] = useState(false);
 
@@ -51,8 +52,8 @@ const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
                 <tbody>
                 <tr>
                     <td>Prompt</td>
-                    <td>{beforeTokens.length}</td>
-                    <td className="text-green-400">{afterTokens.length}</td>
+                    <td className="text-center">{beforeTokens}</td>
+                    <td className="text-green-400 text-center">{afterTokens}</td>
                 </tr>
                 </tbody>
             </table>
