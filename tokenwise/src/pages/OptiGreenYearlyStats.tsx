@@ -81,7 +81,7 @@ const ImpactItem: React.FC<ImpactItemProps> = ({ icon, value, description }) => 
     </div>
     <div className="flex-1">
       <div className="text-2xl font-bold text-green-600">{value}</div>
-      <div className="text-xs text-gray-600 mt-1">{description}</div>
+      <div className="text-xs text-gray-800 mt-1">{description}</div>
     </div>
   </div>
   );
@@ -104,7 +104,7 @@ const OptiGreenYearlyStats: React.FC = () => {
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-950 via-emerald-950 to-blue-950 p-8 text-center text-white">
 
-        <p className="text-sm opacity-90">AI Token Optimization - 2025 Overview</p>
+        <p className="text-2xl opacity-90">AI Token Optimization - 2025 Overview</p>
       </div>
 
       {/* Period Selector */}
@@ -142,11 +142,11 @@ const OptiGreenYearlyStats: React.FC = () => {
             <ChartBar key={index} height={height} />
             ))}
           </div>
-          <div className="text-xs text-gray-400 text-center">Last 12 months average</div>
+          <div className="text-md text-gray-800 text-center">Last 12 months average</div>
         </div>
 
         {/* Savings Cards Grid */}
-        <div className="grid grid-cols-2 gap-4 mb-5">
+        <div className="grid grid-cols-2 gap-4 mb-5 text-black">
           {statCards.map((card, index) => (
           <StatCard key={index} {...card} />
           ))}
@@ -154,7 +154,7 @@ const OptiGreenYearlyStats: React.FC = () => {
 
         {/* Environmental Impact Section */}
         <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-2xl p-5 mb-5">
-          <div className="text-lg font-semibold text-gray-800 mb-4 text-center">
+          <div className="text-xl font-semibold text-gray-800 mb-4 text-center">
             Environmental Impact
           </div>
           {impactItems.map((item, index) => (
@@ -166,14 +166,14 @@ const OptiGreenYearlyStats: React.FC = () => {
         <div className="bg-gray-50 rounded-2xl p-5 mb-5">
           <div className="flex justify-between items-center mb-4">
             <span className="text-base font-semibold text-gray-800">Optimization Trends</span>
-            <span className="text-sm text-green-600 font-semibold">↑ 12%</span>
+            <span className="text-md text-green-600 font-semibold">↑ 12%</span>
           </div>
           <div className="bg-white rounded-xl h-40 flex items-end justify-around p-3 gap-1 mb-3">
             {chartData.optimizationTrends.map((height, index) => (
             <ChartBar key={index} height={height} />
             ))}
           </div>
-          <div className="text-xs text-gray-400 text-center">Monthly improvement rate</div>
+          <div className="text-md text-gray-800 text-center">Monthly improvement rate</div>
         </div>
       </div>
     </div>
