@@ -101,7 +101,7 @@ export default function About() {
         {stats.map((stat, index) => (
         <div
         key={index}
-        className="bg-green-400 bg-opacity-10 border-l-4 border-green-400 p-8 rounded-lg transition-transform duration-300 hover:-translate-y-2 cursor-pointer"
+        className="bg-cyan-200 bg-opacity-10 border-l-4  p-8 rounded-lg transition-transform duration-300 hover:-translate-y-2 cursor-pointer"
         onMouseEnter={() => setHoveredStat(index)}
         onMouseLeave={() => setHoveredStat(null)}
         >
@@ -162,7 +162,7 @@ export default function About() {
 
       {/* Impact Section */}
       <div className="bg-gradient-to-br from-green-400/10 to-blue-500/10 rounded-3xl p-12 my-10">
-        <h2 className="text-4xl md:text-5xl mb-8 text-green-400 text-center">Environmental Impact at Scale</h2>
+        <h2 className="text-4xl md:text-5xl mb-8 text-green-100 text-center">Environmental Impact at Scale</h2>
 
         <p className="text-lg md:text-xl text-white max-w-4xl mx-auto mb-5 text-center">
           AI infrastructure consumes 10-20% of data center energy globally. With AI queries projected to reach 9 trillion by 2030, the carbon impact is exponential without optimization.

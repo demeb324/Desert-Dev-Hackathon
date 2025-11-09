@@ -99,11 +99,11 @@ const ChartBar: React.FC<{ height: number }> = ({ height }) => {
 // Main Component
 const OptiGreenYearlyStats: React.FC = () => {
   return (
-  <div className="min-h-screen bg-gradient-to-br from-purple-600 to-purple-900 p-5">
-    <div className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden">
+  <div className="min-h-screen p-5">
+    <div className="max-w-full mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-green-500 to-green-600 p-8 text-center text-white">
-        <h1 className="text-3xl font-bold mb-1">🌿 OptiGreen</h1>
+      <div className="bg-gradient-to-r from-slate-950 via-emerald-950 to-blue-950 p-8 text-center text-white">
+
         <p className="text-sm opacity-90">AI Token Optimization - 2025 Overview</p>
       </div>
 
@@ -175,11 +175,6 @@ const OptiGreenYearlyStats: React.FC = () => {
           </div>
           <div className="text-xs text-gray-400 text-center">Monthly improvement rate</div>
         </div>
-      </div>
-
-      {/* Footer */}
-      <div className="text-center py-5 bg-gray-50 text-xs text-gray-400">
-        OptiGreen v1.0 • Last updated: Nov 9, 2025
       </div>
     </div>
   </div>

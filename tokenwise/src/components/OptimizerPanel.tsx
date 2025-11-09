@@ -10,7 +10,7 @@ const OptimizerPanel: React.FC<TokenOptimizerProps> = ({ tokenInput }) => {
     const optimizedResult=  tokenInput ? optimize_prompt(tokenInput) : ' Optimized prompt preview shown here...';
 
     const beforeTokens = estimateTokens(tokenInput)
-    const afterTokens = estimateTokens(optimizedResult)
+    const afterTokens = optimizedResult ===     ' Optimized prompt preview shown here...' ? 0 : estimateTokens(optimizedResult)
    // State to manage the visual feedback (e.g., change icon/text after successful copy)
     const [isCopied, setIsCopied] = useState(false);
 

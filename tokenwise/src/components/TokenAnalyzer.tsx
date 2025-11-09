@@ -75,7 +75,7 @@ const TokenAnalyzer: React.FC = () => {
                     <div className="flex gap-2 mt-3">
                         <div className="flex-1 bg-gray-800 px-3 py-2 rounded">
                             <div className="text-xs text-gray-400 flex items-center gap-2"><FaDollarSign /> Cost</div>
-                            <div className="text-lg font-bold text-green-400 ">${cost.toFixed(3)}</div>
+                            <div className="text-lg font-bold text-green-400 ">${cost.toFixed(5)}</div>
                         </div>
                         <div className="flex-1 bg-gray-800 px-3 py-2 rounded">
                             <div className="text-xs text-gray-400 flex items-center gap-2"><FaBolt /> Energy</div>
