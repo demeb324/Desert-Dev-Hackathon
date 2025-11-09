@@ -4,6 +4,7 @@ import { useState, useEffect, forwardRef, useImperativeHandle } from "react";
 import { lmStudioService } from "@/services/lmStudioService";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { ErrorAlert } from "./ErrorAlert";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 export interface OptimizerPanelHandle {
     autoOptimizeAndExecute: () => Promise<void>;
@@ -289,17 +290,19 @@ const OptimizerPanel = forwardRef<OptimizerPanelHandle, TokenOptimizerProps>(({ 
                     </h3>
 
                     {/* Response Display */}
-                    <div className="bg-gray-900 rounded-lg p-4 text-gray-300 text-sm min-h-[120px] flex items-center justify-center">
+                    <div className="bg-gray-900 rounded-lg p-4 text-gray-300 text-sm min-h-[120px]">
                         {isExecuting ? (
-                            <LoadingSpinner text="Executing optimized prompt..." />
-                        ) : llmResponse ? (
-                            <div className="w-full">
-                                <p className="whitespace-pre-wrap">{llmResponse}</p>
+                            <div className="flex items-center justify-center h-full">
+                                <LoadingSpinner text="Executing optimized prompt..." />
                             </div>
+                        ) : llmResponse ? (
+                            <MarkdownRenderer content={llmResponse} />
                         ) : (
-                            <span className="text-gray-500 italic">
-                                No response yet
-                            </span>
+                            <div className="flex items-center justify-center h-full">
+                                <span className="text-gray-500 italic">
+                                    No response yet
+                                </span>
+                            </div>
                         )}
                     </div>
 
