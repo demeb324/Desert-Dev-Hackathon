@@ -620,12 +620,12 @@ def correlate_comparison_mode(
             print(f"  Avg Power: {stats['avg_inference_power_mw']:.0f} mW" if stats['avg_inference_power_mw'] else "  Avg Power: N/A")
             print(f"  Peak Power: {stats['peak_power_mw']} mW" if stats['peak_power_mw'] else "  Peak Power: N/A")
 
-    # Calculate savings
+    # Calculate savings (positive = savings/less energy, negative = increase/more energy)
     if version_stats['original'] and version_stats['rule_optimized']:
         orig_energy = version_stats['original']['total_energy_mj']
         rule_energy = version_stats['rule_optimized']['total_energy_mj']
         rule_savings = ((orig_energy - rule_energy) / orig_energy * 100) if orig_energy > 0 else 0
-        print(f"\nRULE OPTIMIZATION SAVINGS: {rule_savings:+.1f}%")
+        print(f"\nRULE OPTIMIZATION: {rule_savings:+.1f}% saved")
 
     if version_stats['original'] and version_stats['llm_optimized']:
         orig_energy = version_stats['original']['total_energy_mj']
@@ -638,9 +638,9 @@ def correlate_comparison_mode(
         # Calculate savings if we ignore overhead (theoretical best case)
         llm_savings_exec_only = ((orig_energy - llm_exec_only) / orig_energy * 100) if orig_energy > 0 else 0
 
-        print(f"\nLLM OPTIMIZATION SAVINGS:")
-        print(f"  Including optimization overhead: {llm_savings_with_overhead:+.1f}%")
-        print(f"  Execution only (excluding overhead): {llm_savings_exec_only:+.1f}%")
+        print(f"\nLLM OPTIMIZATION:")
+        print(f"  Including optimization overhead: {llm_savings_with_overhead:+.1f}% saved")
+        print(f"  Execution only (excluding overhead): {llm_savings_exec_only:+.1f}% saved")
 
     print(f"{'='*70}\n")
 
@@ -1084,8 +1084,8 @@ def generate_standard_pdf_report(
 
     # Title page
     doc.preamble.append(Command('title', 'LM Studio Power Consumption Analysis'))
-    doc.preamble.append(Command('author', f'Model: {enhanced_data["model"]}'))
-    doc.preamble.append(Command('date', f'Benchmark: {enhanced_data["benchmark_id"]}'))
+    doc.preamble.append(Command('author', NoEscape(f'Model: {escape_latex(enhanced_data["model"])}')))
+    doc.preamble.append(Command('date', NoEscape(f'Benchmark: {escape_latex(enhanced_data["benchmark_id"])}')))
     doc.append(NoEscape(r'\maketitle'))
 
     # Summary Statistics Section
@@ -1331,9 +1331,9 @@ def generate_comparison_pdf_report(
     doc.preamble.append(NoEscape(r'\lstset{basicstyle=\small\ttfamily, breaklines=true, breakatwhitespace=false, columns=flexible}'))
 
     # Title page
-    doc.preamble.append(Command('title', 'LM Studio Power Consumption Analysis\\\\\\large{Comparison Mode}'))
-    doc.preamble.append(Command('author', f'Model: {enhanced_data["model"]}'))
-    doc.preamble.append(Command('date', f'Benchmark: {enhanced_data["benchmark_id"]}'))
+    doc.preamble.append(Command('title', NoEscape(r'LM Studio Power Consumption Analysis\\[0.3em]\large Comparison Mode')))
+    doc.preamble.append(Command('author', NoEscape(f'Model: {escape_latex(enhanced_data["model"])}')))
+    doc.preamble.append(Command('date', NoEscape(f'Benchmark: {escape_latex(enhanced_data["benchmark_id"])}')))
     doc.append(NoEscape(r'\maketitle'))
 
     # Executive Summary
@@ -1363,9 +1363,9 @@ def generate_comparison_pdf_report(
             llm_stats = summary['by_version']['llm_optimized']
             if llm_stats.get('optimization_overhead_mj'):
                 doc.append(NoEscape(r'\textbf{LLM Self-Optimization Breakdown:}\\'))
-                doc.append(f"Optimization overhead: {llm_stats['optimization_overhead_mj']:.1f} mJ\\\\")
-                doc.append(f"Execution energy: {llm_stats['execution_only_energy_mj']:.1f} mJ\\\\")
-                doc.append(f"Total (optimization + execution): {llm_stats['total_energy_mj']:.1f} mJ\\\\")
+                doc.append(NoEscape(f"Optimization overhead: {llm_stats['optimization_overhead_mj']:.1f} mJ\\\\"))
+                doc.append(NoEscape(f"Execution energy: {llm_stats['execution_only_energy_mj']:.1f} mJ\\\\"))
+                doc.append(NoEscape(f"Total (optimization + execution): {llm_stats['total_energy_mj']:.1f} mJ\\\\"))
                 doc.append('\n\n')
 
         # Calculate and show savings
@@ -1373,7 +1373,7 @@ def generate_comparison_pdf_report(
             orig_e = summary['by_version']['original']['total_energy_mj']
             rule_e = summary['by_version']['rule_optimized']['total_energy_mj']
             savings_pct = ((orig_e - rule_e) / orig_e * 100) if orig_e > 0 else 0
-            doc.append(NoEscape(f"\\textbf{{Rule-based optimization:}} {savings_pct:+.1f}\\% energy change\\\\"))
+            doc.append(NoEscape(f"\\textbf{{Rule-based optimization:}} {savings_pct:+.1f}\\% saved\\\\"))
 
         if summary['by_version']['original'] and summary['by_version']['llm_optimized']:
             orig_e = summary['by_version']['original']['total_energy_mj']
@@ -1384,8 +1384,8 @@ def generate_comparison_pdf_report(
             savings_exec_only = ((orig_e - llm_e_exec) / orig_e * 100) if orig_e > 0 else 0
 
             doc.append(NoEscape(f"\\textbf{{LLM self-optimization:}}\\\\"))
-            doc.append(NoEscape(f"\\hspace{{1em}} Including overhead: {savings_with_overhead:+.1f}\\% energy change\\\\"))
-            doc.append(NoEscape(f"\\hspace{{1em}} Execution only: {savings_exec_only:+.1f}\\% energy change\\\\"))
+            doc.append(NoEscape(f"\\hspace{{1em}} Including overhead: {savings_with_overhead:+.1f}\\% saved\\\\"))
+            doc.append(NoEscape(f"\\hspace{{1em}} Execution only: {savings_exec_only:+.1f}\\% saved\\\\"))
 
     # Version Comparison Charts
     with doc.create(Section('Version Comparison')):
