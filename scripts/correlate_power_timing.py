@@ -253,6 +253,81 @@ def analyze_prompt_power(
     )
 
 
+def analyze_prompt_power_with_optimization(
+    version_data: Dict,
+    power_samples: List[Dict],
+    baseline_window_s: float,
+    cooldown_window_s: float,
+    reference_timezone
+) -> Dict:
+    """
+    Analyze power for prompts with LLM optimization step.
+
+    For llm_optimized prompts, this analyzes BOTH:
+    1. The optimization window (LLM optimizing the prompt)
+    2. The execution window (running the optimized prompt)
+
+    Args:
+        version_data: Version data with timing and optimization_metadata
+        power_samples: All power samples
+        baseline_window_s: Baseline window duration
+        cooldown_window_s: Cooldown window duration
+        reference_timezone: Reference timezone
+
+    Returns:
+        Dict with optimization_analysis, execution_analysis, and combined metrics
+    """
+    # Analyze optimization window if it exists
+    opt_analysis = None
+    opt_energy = 0
+
+    if version_data.get('optimization_metadata') and \
+       version_data['optimization_metadata'].get('optimization_timing'):
+
+        opt_timing = version_data['optimization_metadata']['optimization_timing']
+
+        # Create a temporary prompt dict with just the optimization timing
+        opt_prompt_data = {'timing': opt_timing}
+
+        opt_analysis = analyze_prompt_power(
+            opt_prompt_data,
+            power_samples,
+            baseline_window_s,
+            cooldown_window_s,
+            reference_timezone
+        )
+
+        if opt_analysis and opt_analysis.energy_estimate_mj:
+            opt_energy = opt_analysis.energy_estimate_mj
+
+    # Analyze execution window (the actual benchmark run)
+    exec_analysis = analyze_prompt_power(
+        version_data,
+        power_samples,
+        baseline_window_s,
+        cooldown_window_s,
+        reference_timezone
+    )
+
+    # Calculate combined energy
+    exec_energy = exec_analysis.energy_estimate_mj if exec_analysis.energy_estimate_mj else 0
+    total_energy = exec_energy + opt_energy
+
+    # Return comprehensive analysis
+    return {
+        'optimization_analysis': asdict(opt_analysis) if opt_analysis else None,
+        'execution_analysis': asdict(exec_analysis),
+        'combined_energy_mj': total_energy,
+        'optimization_overhead_mj': opt_energy,
+        # Keep these for backward compatibility with existing code
+        'baseline': asdict(exec_analysis.baseline) if exec_analysis.baseline else None,
+        'inference': asdict(exec_analysis.inference) if exec_analysis.inference else None,
+        'cooldown': asdict(exec_analysis.cooldown) if exec_analysis.cooldown else None,
+        'peak_power_mw': exec_analysis.peak_power_mw,
+        'energy_estimate_mj': total_energy  # This is now the COMBINED energy
+    }
+
+
 def correlate_power_timing(
     benchmark_file: str,
     power_file: str,
@@ -398,22 +473,45 @@ def correlate_comparison_mode(
         for version in group['versions']:
             print(f"    - {version['prompt_version']}: {version['prompt'][:50]}...")
 
-            power_analysis = analyze_prompt_power(
-                version,
-                power_samples,
-                baseline_window_s,
-                cooldown_window_s,
-                reference_tz
-            )
+            # For llm_optimized, use special analysis that includes optimization step
+            if version['prompt_version'] == 'llm_optimized':
+                power_analysis = analyze_prompt_power_with_optimization(
+                    version,
+                    power_samples,
+                    baseline_window_s,
+                    cooldown_window_s,
+                    reference_tz
+                )
+                # power_analysis is already a dict
+                enhanced_version = version.copy()
+                enhanced_version['power_analysis'] = power_analysis
+                enhanced_versions.append(enhanced_version)
 
-            enhanced_version = version.copy()
-            enhanced_version['power_analysis'] = asdict(power_analysis)
-            enhanced_versions.append(enhanced_version)
+                # Print summary with optimization overhead
+                if power_analysis.get('inference'):
+                    opt_overhead = power_analysis.get('optimization_overhead_mj', 0)
+                    total_energy = power_analysis.get('combined_energy_mj', 0)
+                    print(f"        Execution: {power_analysis['inference']['avg_mw']:.0f} mW avg")
+                    print(f"        Optimization overhead: {opt_overhead:.1f} mJ")
+                    print(f"        Total energy (opt + exec): {total_energy:.1f} mJ")
+            else:
+                # Standard analysis for original and rule_optimized
+                power_analysis = analyze_prompt_power(
+                    version,
+                    power_samples,
+                    baseline_window_s,
+                    cooldown_window_s,
+                    reference_tz
+                )
 
-            # Print summary
-            if power_analysis.inference:
-                print(f"        Power: {power_analysis.inference.avg_mw:.0f} mW avg, "
-                      f"Energy: {power_analysis.energy_estimate_mj:.1f} mJ")
+                enhanced_version = version.copy()
+                enhanced_version['power_analysis'] = asdict(power_analysis)
+                enhanced_versions.append(enhanced_version)
+
+                # Print summary
+                if power_analysis.inference:
+                    print(f"        Power: {power_analysis.inference.avg_mw:.0f} mW avg, "
+                          f"Energy: {power_analysis.energy_estimate_mj:.1f} mJ")
 
         enhanced_group = group.copy()
         enhanced_group['versions'] = enhanced_versions
@@ -429,11 +527,23 @@ def correlate_comparison_mode(
         if not version_prompts:
             return None
 
+        # For llm_optimized, energy_estimate_mj includes BOTH optimization and execution
+        # For others, it's just execution
         total_energy = sum(
             v['power_analysis']['energy_estimate_mj']
             for v in version_prompts
             if v['power_analysis']['energy_estimate_mj'] is not None
         )
+
+        # Calculate optimization overhead (only for llm_optimized)
+        optimization_overhead = 0
+        execution_only_energy = 0
+        if version_name == 'llm_optimized':
+            optimization_overhead = sum(
+                v['power_analysis'].get('optimization_overhead_mj', 0)
+                for v in version_prompts
+            )
+            execution_only_energy = total_energy - optimization_overhead
 
         valid_power = [v for v in version_prompts if v['power_analysis']['inference'] is not None]
         avg_power = sum(
@@ -447,11 +557,18 @@ def correlate_comparison_mode(
             for v in valid_peak
         ) if valid_peak else None
 
-        return {
+        stats = {
             'total_energy_mj': total_energy,
             'avg_inference_power_mw': avg_power,
             'peak_power_mw': peak_power,
         }
+
+        # Add optimization breakdown for llm_optimized
+        if version_name == 'llm_optimized':
+            stats['optimization_overhead_mj'] = optimization_overhead
+            stats['execution_only_energy_mj'] = execution_only_energy
+
+        return stats
 
     version_stats = {
         'original': calc_version_stats('original'),
@@ -492,6 +609,14 @@ def correlate_comparison_mode(
         if stats:
             print(f"\n{version_name.upper()}:")
             print(f"  Total Energy: {stats['total_energy_mj']:.1f} mJ")
+
+            # Show breakdown for llm_optimized
+            if version_name == 'llm_optimized':
+                opt_overhead = stats.get('optimization_overhead_mj', 0)
+                exec_only = stats.get('execution_only_energy_mj', 0)
+                print(f"    - Optimization overhead: {opt_overhead:.1f} mJ")
+                print(f"    - Execution only: {exec_only:.1f} mJ")
+
             print(f"  Avg Power: {stats['avg_inference_power_mw']:.0f} mW" if stats['avg_inference_power_mw'] else "  Avg Power: N/A")
             print(f"  Peak Power: {stats['peak_power_mw']} mW" if stats['peak_power_mw'] else "  Peak Power: N/A")
 
@@ -504,21 +629,18 @@ def correlate_comparison_mode(
 
     if version_stats['original'] and version_stats['llm_optimized']:
         orig_energy = version_stats['original']['total_energy_mj']
-        llm_energy = version_stats['llm_optimized']['total_energy_mj']
-        # Add LLM optimization overhead
-        if 'optimization_overhead' in benchmark_data['summary']:
-            llm_overhead = benchmark_data['summary']['optimization_overhead'].get('total_llm_optimization_time_s', 0)
-            # Estimate overhead energy (assuming similar power consumption)
-            if version_stats['original']['avg_inference_power_mw']:
-                llm_overhead_energy = version_stats['original']['avg_inference_power_mw'] * llm_overhead
-                llm_energy_total = llm_energy + llm_overhead_energy
-                print(f"  (LLM optimization overhead: {llm_overhead_energy:.1f} mJ)")
-            else:
-                llm_energy_total = llm_energy
-        else:
-            llm_energy_total = llm_energy
-        llm_savings = ((orig_energy - llm_energy_total) / orig_energy * 100) if orig_energy > 0 else 0
-        print(f"LLM OPTIMIZATION SAVINGS (incl. overhead): {llm_savings:+.1f}%")
+        llm_energy_total = version_stats['llm_optimized']['total_energy_mj']  # Already includes overhead
+        llm_exec_only = version_stats['llm_optimized'].get('execution_only_energy_mj', llm_energy_total)
+
+        # Calculate savings including overhead (realistic)
+        llm_savings_with_overhead = ((orig_energy - llm_energy_total) / orig_energy * 100) if orig_energy > 0 else 0
+
+        # Calculate savings if we ignore overhead (theoretical best case)
+        llm_savings_exec_only = ((orig_energy - llm_exec_only) / orig_energy * 100) if orig_energy > 0 else 0
+
+        print(f"\nLLM OPTIMIZATION SAVINGS:")
+        print(f"  Including optimization overhead: {llm_savings_with_overhead:+.1f}%")
+        print(f"  Execution only (excluding overhead): {llm_savings_exec_only:+.1f}%")
 
     print(f"{'='*70}\n")
 
@@ -1235,8 +1357,18 @@ def generate_comparison_pdf_report(
                     ])
             table.add_hline()
 
-        # Calculate and show savings
+        # Add LLM optimization overhead breakdown
         doc.append('\n\n')
+        if summary['by_version']['llm_optimized']:
+            llm_stats = summary['by_version']['llm_optimized']
+            if llm_stats.get('optimization_overhead_mj'):
+                doc.append(NoEscape(r'\textbf{LLM Self-Optimization Breakdown:}\\'))
+                doc.append(f"Optimization overhead: {llm_stats['optimization_overhead_mj']:.1f} mJ\\\\")
+                doc.append(f"Execution energy: {llm_stats['execution_only_energy_mj']:.1f} mJ\\\\")
+                doc.append(f"Total (optimization + execution): {llm_stats['total_energy_mj']:.1f} mJ\\\\")
+                doc.append('\n\n')
+
+        # Calculate and show savings
         if summary['by_version']['original'] and summary['by_version']['rule_optimized']:
             orig_e = summary['by_version']['original']['total_energy_mj']
             rule_e = summary['by_version']['rule_optimized']['total_energy_mj']
@@ -1245,9 +1377,15 @@ def generate_comparison_pdf_report(
 
         if summary['by_version']['original'] and summary['by_version']['llm_optimized']:
             orig_e = summary['by_version']['original']['total_energy_mj']
-            llm_e = summary['by_version']['llm_optimized']['total_energy_mj']
-            savings_pct = ((orig_e - llm_e) / orig_e * 100) if orig_e > 0 else 0
-            doc.append(NoEscape(f"\\textbf{{LLM self-optimization:}} {savings_pct:+.1f}\\% energy change (excluding optimization overhead)\\\\"))
+            llm_e_total = summary['by_version']['llm_optimized']['total_energy_mj']  # Includes overhead
+            llm_e_exec = summary['by_version']['llm_optimized'].get('execution_only_energy_mj', llm_e_total)
+
+            savings_with_overhead = ((orig_e - llm_e_total) / orig_e * 100) if orig_e > 0 else 0
+            savings_exec_only = ((orig_e - llm_e_exec) / orig_e * 100) if orig_e > 0 else 0
+
+            doc.append(NoEscape(f"\\textbf{{LLM self-optimization:}}\\\\"))
+            doc.append(NoEscape(f"\\hspace{{1em}} Including overhead: {savings_with_overhead:+.1f}\\% energy change\\\\"))
+            doc.append(NoEscape(f"\\hspace{{1em}} Execution only: {savings_exec_only:+.1f}\\% energy change\\\\"))
 
     # Version Comparison Charts
     with doc.create(Section('Version Comparison')):
@@ -1277,18 +1415,26 @@ def generate_comparison_pdf_report(
                 doc.append(NoEscape(r'\textbf{Version Comparison:}'))
                 doc.append('\n\n')
 
-                with doc.create(Tabular('|l|r|r|r|')) as table:
+                with doc.create(Tabular('|l|r|r|r|r|')) as table:
                     table.add_hline()
-                    table.add_row([bold('Version'), bold('Energy (mJ)'), bold('Avg Power (mW)'), bold('Duration (s)')])
+                    table.add_row([bold('Version'), bold('Total Energy (mJ)'), bold('Opt. OH (mJ)'),
+                                  bold('Avg Power (mW)'), bold('Duration (s)')])
                     table.add_hline()
 
                     for version in group['versions']:
                         pa = version['power_analysis']
                         timing = version['timing']
+
+                        # Get optimization overhead if it exists
+                        opt_overhead = ''
+                        if version['prompt_version'] == 'llm_optimized' and pa.get('optimization_overhead_mj'):
+                            opt_overhead = f"{pa['optimization_overhead_mj']:.1f}"
+
                         table.add_row([
                             version['prompt_version'].replace('_', ' ').title(),
-                            f"{pa['energy_estimate_mj']:.1f}" if pa['energy_estimate_mj'] else 'N/A',
-                            f"{pa['inference']['avg_mw']:.0f}" if pa['inference'] else 'N/A',
+                            f"{pa['energy_estimate_mj']:.1f}" if pa.get('energy_estimate_mj') else 'N/A',
+                            opt_overhead,
+                            f"{pa['inference']['avg_mw']:.0f}" if pa.get('inference') else 'N/A',
                             f"{timing['inference_duration_s']:.2f}"
                         ])
                     table.add_hline()
@@ -1405,10 +1551,24 @@ Note:
         generate_pdf_report(enhanced_data, power_samples, args.output)
 
         print(f"\nSummary:")
-        print(f"  Total prompts: {enhanced_data['summary']['total_prompts']}")
-        print(f"  Total energy: {enhanced_data['summary']['total_energy_mj']:.1f} mJ")
-        print(f"  Avg inference power: {enhanced_data['summary']['avg_inference_power_mw']:.0f} mW")
-        print(f"  Peak power: {enhanced_data['summary']['peak_power_mw']} mW")
+
+        # Handle different summary structures for comparison vs standard mode
+        if enhanced_data.get('comparison_mode'):
+            print(f"  Mode: Comparison")
+            print(f"  Total base prompts: {enhanced_data['summary']['total_base_prompts']}")
+            print(f"  Total executions: {enhanced_data['summary']['total_executions']}")
+            print(f"  Total energy (all versions): {enhanced_data['summary']['total_energy_all_versions_mj']:.1f} mJ")
+
+            # Show per-version breakdown
+            for version_name, stats in enhanced_data['summary']['by_version'].items():
+                if stats:
+                    print(f"  {version_name.replace('_', ' ').title()}: {stats['total_energy_mj']:.1f} mJ")
+        else:
+            print(f"  Mode: Standard")
+            print(f"  Total prompts: {enhanced_data['summary']['total_prompts']}")
+            print(f"  Total energy: {enhanced_data['summary']['total_energy_mj']:.1f} mJ")
+            print(f"  Avg inference power: {enhanced_data['summary']['avg_inference_power_mw']:.0f} mW")
+            print(f"  Peak power: {enhanced_data['summary']['peak_power_mw']} mW")
 
     except Exception as e:
         import traceback
