@@ -738,7 +738,7 @@ def generate_pdf_report(
 
                 # Prompt text - full text in monospace
                 prompt_text = prompt['prompt']
-                doc.append(bold('Prompt:'))
+                doc.append(NoEscape(r'\textbf{Prompt:}'))
                 doc.append('\n\n')
                 # Write entire lstlisting block as raw LaTeX to avoid newline command issues
                 lstlisting_block = f"\\begin{{lstlisting}}\n{prompt_text}\n\\end{{lstlisting}}\n"
@@ -746,14 +746,14 @@ def generate_pdf_report(
 
                 # Response text - full text in monospace
                 response_text = prompt['response']
-                doc.append(bold('Response:'))
+                doc.append(NoEscape(r'\textbf{Response:}'))
                 doc.append('\n\n')
                 # Write entire lstlisting block as raw LaTeX to avoid newline command issues
                 lstlisting_response = f"\\begin{{lstlisting}}\n{response_text}\n\\end{{lstlisting}}\n"
                 doc.append(NoEscape(lstlisting_response))
 
                 # Timing Information Table
-                doc.append(bold('Timing Information:'))
+                doc.append(NoEscape(r'\textbf{Timing Information:}'))
                 doc.append('\n\n')
                 timing = prompt['timing']
                 with doc.create(Tabular('|l|l|')) as table:
@@ -770,7 +770,7 @@ def generate_pdf_report(
                 doc.append('\n\n')
 
                 # Inference Statistics Table
-                doc.append(bold('Inference Statistics:'))
+                doc.append(NoEscape(r'\textbf{Inference Statistics:}'))
                 doc.append('\n\n')
                 stats = prompt['inference_stats']
                 with doc.create(Tabular('|l|l|')) as table:
@@ -789,7 +789,7 @@ def generate_pdf_report(
                 doc.append('\n\n')
 
                 # Power Analysis Table
-                doc.append(bold('Power Consumption Analysis:'))
+                doc.append(NoEscape(r'\textbf{Power Consumption Analysis:}'))
                 doc.append('\n\n')
                 pa = prompt['power_analysis']
 
@@ -822,11 +822,49 @@ def generate_pdf_report(
 
                     table.add_hline()
 
-                # Energy estimate
-                if pa['energy_estimate_mj']:
-                    doc.append(f"\n{bold('Energy Estimate:')} {pa['energy_estimate_mj']:.1f} mJ\n")
-                if pa['peak_power_mw']:
-                    doc.append(f"{bold('Peak Power:')} {pa['peak_power_mw']} mW\n")
+                    # Add difference row if both baseline and inference exist
+                    if pa['baseline'] and pa['inference']:
+                        diff_mw = inf['avg_mw'] - bl['avg_mw']
+                        pct_increase = (diff_mw / bl['avg_mw']) * 100 if bl['avg_mw'] > 0 else 0
+                        table.add_row([NoEscape(r'$\Delta$ Inference-Baseline'), '', '',
+                                      NoEscape(f"{diff_mw:+.0f} ({pct_increase:+.1f}\\%)"), ''])
+                        table.add_hline()
+
+                # Energy Summary Table
+                doc.append(NoEscape(r'\textbf{Energy Summary:}'))
+                doc.append('\n\n')
+
+                with doc.create(Tabular('|l|r|')) as table:
+                    table.add_hline()
+                    table.add_row([bold('Metric'), bold('Value')])
+                    table.add_hline()
+
+                    if pa['energy_estimate_mj']:
+                        table.add_row(['Total Energy', f"{pa['energy_estimate_mj']:.1f} mJ"])
+
+                    if pa['peak_power_mw']:
+                        table.add_row(['Peak Power', f"{pa['peak_power_mw']} mW"])
+
+                    # Calculate and display incremental energy
+                    if pa['baseline'] and pa['inference'] and pa['energy_estimate_mj']:
+                        baseline_avg_mw = pa['baseline']['avg_mw']
+                        inference_duration_s = prompt['timing']['inference_duration_s']
+
+                        # Energy if baseline continued for full inference duration
+                        # FIXED: No division needed - mW × s = mJ directly
+                        baseline_continuation_energy_mj = baseline_avg_mw * inference_duration_s
+
+                        # Extra energy consumed by inference workload above baseline
+                        incremental_energy_mj = pa['energy_estimate_mj'] - baseline_continuation_energy_mj
+
+                        # Percentage of total energy that's incremental
+                        incremental_pct = (incremental_energy_mj / pa['energy_estimate_mj'] * 100) if pa['energy_estimate_mj'] > 0 else 0
+
+                        table.add_row(['Incremental Energy',
+                                      f"{incremental_energy_mj:.1f} mJ ({incremental_pct:.1f}%)"])
+
+                    table.add_hline()
+
                 doc.append('\n')
 
                 # Individual timeline chart
