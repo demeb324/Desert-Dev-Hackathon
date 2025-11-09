@@ -3,5 +3,12 @@
 # LM Studio Python SDK for local LLM inference
 lmstudio>=1.0.1
 
+# PDF report generation with LaTeX
+pylatex>=1.4.0
+
+# Data visualization
+matplotlib>=3.5.0
+
 # Note: powermetrics is a macOS system utility (no Python package needed)
 # The scripts use subprocess to invoke powermetrics directly
+# Note: PDF generation requires LaTeX installation (MacTeX recommended for macOS)

@@ -654,9 +654,9 @@ def generate_pdf_report(
 
     # Check for LaTeX installation
     import shutil
-    if not shutil.which('pdflatex'):
-        print("\nERROR: pdflatex not found!", file=sys.stderr)
-        print("PDF generation requires a LaTeX distribution.", file=sys.stderr)
+    if not shutil.which('lualatex'):
+        print("\nERROR: lualatex not found!", file=sys.stderr)
+        print("PDF generation requires a LaTeX distribution with LuaLaTeX.", file=sys.stderr)
         print("On macOS, install MacTeX: brew install --cask mactex", file=sys.stderr)
         print("Or BasicTeX: brew install --cask basictex", file=sys.stderr)
         sys.exit(1)
@@ -675,6 +675,10 @@ def generate_pdf_report(
     doc.packages.append(Package('float'))      # Figure positioning
     doc.packages.append(Package('longtable'))  # Multi-page tables
     doc.packages.append(Package('array'))      # Better table columns
+    doc.packages.append(Package('listings'))   # For code/verbatim blocks with line breaking
+
+    # Configure listings for better verbatim display
+    doc.preamble.append(NoEscape(r'\lstset{basicstyle=\small\ttfamily, breaklines=true, breakatwhitespace=false, columns=flexible}'))
 
     # Title page
     doc.preamble.append(Command('title', 'LM Studio Power Consumption Analysis'))
@@ -732,21 +736,21 @@ def generate_pdf_report(
         for i, prompt in enumerate(enhanced_data['prompts']):
             with doc.create(Subsection(f'Prompt {i+1}: {prompt["category"].upper()}')):
 
-                # Prompt text (truncate if very long)
+                # Prompt text - full text in monospace
                 prompt_text = prompt['prompt']
-                if len(prompt_text) > 200:
-                    prompt_text = prompt_text[:200] + "..."
-                doc.append(bold('Prompt: '))
-                doc.append(escape_latex(prompt_text))
+                doc.append(bold('Prompt:'))
                 doc.append('\n\n')
+                # Write entire lstlisting block as raw LaTeX to avoid newline command issues
+                lstlisting_block = f"\\begin{{lstlisting}}\n{prompt_text}\n\\end{{lstlisting}}\n"
+                doc.append(NoEscape(lstlisting_block))
 
-                # Response text (truncate if very long)
+                # Response text - full text in monospace
                 response_text = prompt['response']
-                if len(response_text) > 300:
-                    response_text = response_text[:300] + "..."
-                doc.append(bold('Response: '))
-                doc.append(escape_latex(response_text))
+                doc.append(bold('Response:'))
                 doc.append('\n\n')
+                # Write entire lstlisting block as raw LaTeX to avoid newline command issues
+                lstlisting_response = f"\\begin{{lstlisting}}\n{response_text}\n\\end{{lstlisting}}\n"
+                doc.append(NoEscape(lstlisting_response))
 
                 # Timing Information Table
                 doc.append(bold('Timing Information:'))
@@ -838,7 +842,7 @@ def generate_pdf_report(
     # Generate PDF
     print(f"Compiling LaTeX to PDF...")
     try:
-        doc.generate_pdf(output_file, clean_tex=False, compiler='pdflatex')
+        doc.generate_pdf(output_file, clean_tex=False, compiler='lualatex')
         print(f"\n{'='*70}")
         print(f"PDF report generated successfully!")
         print(f"{'='*70}")
