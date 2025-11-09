@@ -251,43 +251,24 @@ const OptimizerPanel = forwardRef<OptimizerPanelHandle, TokenOptimizerProps>(({ 
                     <strong className="text-gray-200">{optimizedResult}</strong>
                 ) : (
                     <span className="text-gray-500 italic">
-                        Click "Optimize" to process your prompt
+                        Click "Analyze & Run" to optimize your prompt
                     </span>
                 )}
             </div>
 
-            {/* Action Buttons */}
-            <div className="mt-3 flex gap-2">
-                <button
-                    className="flex-1 bg-cyan-500 hover:bg-cyan-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
-                    onClick={handleOptimize}
-                    disabled={isOptimizing || !tokenInput || tokenInput.trim() === ""}
-                >
-                    <FaMagic />
-                    {isOptimizing ? "Optimizing..." : "Optimize"}
-                </button>
-
-                <button
-                    className="flex-1 bg-pink-500 hover:bg-pink-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
-                    onClick={handleCopy}
-                    disabled={!optimizedResult || isOptimizing}
-                >
-                    {isCopied ? <FaCheck /> : <FaCopy />}
-                    {isCopied ? "Copied!" : "Copy"}
-                </button>
-            </div>
-
-            {/* Execute Button */}
-            <div className="mt-3">
-                <button
-                    className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
-                    onClick={handleExecute}
-                    disabled={isExecuting || !optimizedResult || isOptimizing}
-                >
-                    <FaPlay />
-                    {isExecuting ? "Running..." : "Run Optimized Prompt"}
-                </button>
-            </div>
+            {/* Copy Optimized Prompt Button (subtle) */}
+            {optimizedResult && (
+                <div className="mt-2 flex justify-end">
+                    <button
+                        className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-3 py-1 rounded flex items-center gap-1 transition-colors"
+                        onClick={handleCopy}
+                        disabled={isOptimizing}
+                    >
+                        {isCopied ? <FaCheck /> : <FaCopy />}
+                        {isCopied ? "Copied!" : "Copy"}
+                    </button>
+                </div>
+            )}
 
             {/* Execute Error Alert */}
             {executeError && (
