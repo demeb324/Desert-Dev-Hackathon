@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
-import { FaBrain, FaCog, FaInfoCircle } from "react-icons/fa";
+import {FaBrain, FaChartLine, FaCog, FaInfoCircle, FaLeaf} from "react-icons/fa";
+import TypewriterText from "./typewriter.tsx";
 
 const Navbar: React.FC = () => {
     const location = useLocation();
@@ -12,7 +13,8 @@ const Navbar: React.FC = () => {
     return (
         <nav className="flex items-center justify-between px-6 py-4 bg-gray-800 shadow-lg">
             <Link to="/" className="flex items-center gap-2 text-xl font-bold text-cyan-400">
-                <FaBrain className="text-5xl font-extrabold" /> OPTIGREEN
+                <FaLeaf className="text-6xl font-extrabold ml-20 font-mono" />
+                <TypewriterText text="OPTIGREEN" style="text-6xl" />
             </Link>
             <div className="flex items-center gap-6">
                 <Link to="/" className={linkClass("/")}>
@@ -20,6 +22,9 @@ const Navbar: React.FC = () => {
                 </Link>
                 <Link to="/about" className={linkClass("/about")}>
                     <FaInfoCircle /> About
+                </Link>
+                <Link to="/statistics" className={linkClass("/statistics")}>
+                    <FaChartLine /> Statistics
                 </Link>
             </div>
         </nav>
